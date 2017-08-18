@@ -1,0 +1,4 @@
+include LICENSE
+include README.rst
+recursive-include jdma_control/static *
+recursive-include jdma_control/templates *
