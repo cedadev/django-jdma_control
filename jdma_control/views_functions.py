@@ -42,3 +42,6 @@ def UserHasWritePermission(path, user):
 
 def UserHasETQuota(path, user, workspace):
     return True
+
+def UserHasSufficientDiskSpace(path, user, size):
+    return True
