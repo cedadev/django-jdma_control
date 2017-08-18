@@ -57,7 +57,7 @@ class UserView(View):
             # get the username
             username = request.GET.get("name", "")
             # get the user or 404
-            error_data = data
+            error_data = {}
             try:
                 if username:
                     user = User.objects.get(name=username)
@@ -295,6 +295,7 @@ class MigrationRequestView(View):
     """:rest-api
 
     Requests to resources concerning migration requests in the JASMIN data migration app (JDMA).
+    Note - no PUT, cannot edit any part of the request
     """
 
     def get(self, request, *args, **kwargs):
@@ -354,62 +355,44 @@ class MigrationRequestView(View):
             # get the keywords
             keyargs = {"pk": int(request.GET.get("request_id")),
                        "user__name": request.GET.get("name")}
-            if "workspace" in request.GET:
-                keyargs["workspace"] = request.GET.get("workspace")
 
             try:
                 req = MigrationRequest.objects.get(**keyargs)
             except:
                 # return error as easily interpreted JSON
-                error_data = {"error"  : "Migration request not found.",
+                error_data = {"error"  : "Request not found.",
                               "request_id" : keyargs["pk"],
                               "name"   : keyargs["user__name"]}
-                if "workspace" in keyargs:
-                    error_data["workspace"] = keyargs["workspace"]
                 return HttpError(error_data)
 
             # full details - these are all the required fields
-            data = {"request_id":req.id, "user":req.user.name, "workspace":req.workspace,
-                    "request_type":req.request_type, "stage" : req.stage}
-            # now add the optional fields
-            if req.et_id:
-                data["et_id"] = req.et_id
-            if req.label:
-                data["label"] = req.label
-            if req.original_path:
-                data["original_path"] = req.original_path
-            if req.registered_date:
-                data["registered_date"] = req.registered_date.isoformat()
-            if req.unix_user_id:
-                data["unix_user_id"] = req.unix_user_id
-            if req.unix_group_id:
-                data["unix_group_id"] = req.unix_group_id
-            if req.unix_permission:
-                data["unix_permission"] = req.unix_permission
+            data = {"request_id": req.id, "user": req.user.name,
+                    "request_type": req.request_type,
+                    "migration_id": req.migration.pk,
+                    "migration_label": req.migration.label,
+                    "stage": req.migration.stage}
+            if req.date:
+                data["date"] = req.date.isoformat()
         else:
             # return details of all the migration requests for this user
             keyargs = {"user__name": request.GET.get("name")}
-            if "workspace" in request.GET:
-                keyargs["workspace"] = request.GET.get("workspace")
-
             try:
                 reqs = MigrationRequest.objects.filter(**keyargs)
             except:
                 # return error as easily interpreted JSON
-                error_data = {"error"  : "Migration request not found.",
+                error_data = {"error"  : "Request not found.",
                               "name"   : keyargs["user__name"]}
-                if "workspace" in keyargs:
-                    error_data["workspace"] = keyargs["workspace"]
                 return HttpError(error_data)
             # loop over the requests and add to the data at the end
             requests = []
             for r in reqs:
-                req_data = {"request_id": r.pk, "user":r.user.name, "workspace":r.workspace,
-                            "request_type":r.request_type, "stage" : r.stage}
-                if r.registered_date:
-                    req_data["registered_date"] = r.registered_date.isoformat()
-                if r.label:
-                    req_data["label"] = r.label
+                req_data = {"request_id": r.pk, "user": r.user.name,
+                            "request_type": r.request_type,
+                            "migration_id": r.migration.pk,
+                            "migration_label": r.migration.label,
+                            "stage": r.migration.stage}
+                if r.date:
+                    req_data["date"] = r.date.isoformat()
                 requests.append(req_data)
             data = {"requests": requests}
         return HttpResponse(json.dumps(data), content_type="application/json")
@@ -427,9 +410,11 @@ class MigrationRequestView(View):
                :<jsonarr string name: the user id to use in making the request
                :<jsonarr string workspace: the workspace to use in making the request
                :<jsonarr string request_type: GET | PUT | VERIFY
-               :<jsonarr string original_path: the path of the original directory
-               :<jsonarr string label: (*optional*) a human readable label for the request.
+               :<jsonarr string original_path: the path of the original directory (for PUT)
+               :<jsonarr string label: (*optional*) a human readable label for the request (for PUT or GET).
                  A default will be derived from the original path if no label is supplied in the POST request.
+               :<jsonarr int id: the id of the Migration to retrieve (for GET)
+               :<jsonarr string
         """
         # first do some error checking on the request and get the values if the keywords are in the request
         # check name is in request
@@ -441,7 +426,7 @@ class MigrationRequestView(View):
 
         if not "name" in data:
             error_data["error"] = "No name supplied."
-            return HttpError(error_data)
+            return HttpError(error_data, status=500)
 
         # check name exists as a user
         try:
@@ -449,13 +434,6 @@ class MigrationRequestView(View):
         except:
             error_data["error"] = "User not found."
             return HttpError(data)
-
-        # check workspace is in request
-        if not "workspace" in data:
-            error_data["error"] = "No workspace supplied."
-            return HttpError(error_data)
-
-        # check workspace exists?
 
         # check request type is in request
         if not "request_type" in data:
@@ -467,90 +445,248 @@ class MigrationRequestView(View):
             error_data["error"] = "Invalid request method."
             return HttpError(error_data)
 
-        # check original path is in the request
-        if not "original_path" in data:
-            error_data["error"] = "No directory path supplied."
-            return HttpError(error_data)
-        else:
-            original_path = data["original_path"]
-            # remove any trailing slash
-            if original_path[-1] == "/":
-                original_path = original_path[:-1]
+        # create the MigrationRequest (GET, PUT, VERIFY)
+        migration_request = MigrationRequest()
+        # assign the user to the MigrationRequest
+        migration_request.user = user
+        # get the migration request type
+        migration_request.request_type = MigrationRequest.REQUEST_MAP[data["request_type"]]
+        # get the date
+        cdate = datetime.utcnow()
+        # set the date
+        migration_request.date = cdate
 
-            # check that there is not already an entry with this path
-            if MigrationRequest.objects.filter(original_path=original_path):
-                error_data["error"] = "Directory is already in a migration request."
+        # now choose what to do based on the request
+        if data["request_type"] == "GET":
+            # checks
+            #   1. Check that the request id is supplied
+            #   2. Check that the request exists
+            #   3. Check that the stage is ON_TAPE
+            #   4. Check the user has permission to write to the target directory (or original path if not set)
+            #   5. Check there is enough space on disk
+
+            #   1. check request id is supplied
+            if not "request_id" in data:
+                error_data["error"] = "No request id supplied."
                 return HttpError(error_data)
 
-        # check for the label in the request - if not then derive from directory name
-        if "label" in data:
-            label = data["label"]
-        else:
-            label = original_path.split("/")[-1]
+            #   2. check request id exists
+            try:
+                req = MigrationRequest.objects.get(pk=data["request_id"])
+            except:
+                error_data["error"] = "Migration not found."
+                return HttpError(error_data)
 
-        # three checks:
-        #   1. Check the path exists (obvs.)
-        #   2. Check the user has write permission to the directory
-        #   3. Check the user has enough space in their ET quota
+            #   3. check that the stage is ON_TAPE
+            if req.migration.stage != Migration.ON_TAPE:
+                mig_stage = Migration.STAGE_CHOICES[req.migration.stage][1]
+                error_data["error"] = "Migration stage is: " + mig_stage + ".  Cannot retrieve (GET) until stage is ON_TAPE."
+                return HttpError(error_data)
 
-        # 1. check that the path exists
-        if not os.path.isdir(original_path):
-            error_data["error"] = "Directory path does not exist."
-            return HttpError(error_data)
+            # We don't need to create a migration as we're operating on an existing one - assign it
+            migration_request.migration = req.migration
 
-        # 2. check that the user has write permissions
-        if not UserHasWritePermission(original_path, data["name"]):
-            error_data["error"] = "User does not have write permission to the directory."
-            return HttpError(error_data)
+            #   4. check the user has permission to write to the target directory (or original path if not set)
+            # get the target dir
+            if "target_path" in data:
+                target_path = data["target_path"]
+            else:
+                target_path = migration_request.migration.original_path
+            # check the user has permission to write to the directory
+            if not UserHasWritePermission(target_path, data["name"]):
+                error_data["error"] = "User does not have write permission to the directory: " + str(target_path)
+                return HttpError(error_data, status=403)
 
-        # 3. check et_quota ** TO DO ** implement this function!
-        if not UserHasETQuota(original_path, data["name"], data["workspace"]):
-            error_data["error"] = "Insufficient remaining Elastic Tape quota."
-            return HttpError(error_data)
+            #   5. Check there is enough space on disk
+            retrieval_size = 0
+            if not UserHasSufficientDiskSpace(target_path, data["name"], retrieval_size): # implement this function
+                error_data["error"] = "Insufficient diskpace for the retrieval (GET) " + str(target_path)
+                return HttpError(error_data, status=403)
 
-        # All the checks have passed, so we can now add the request to the JDMA database
-        migration_request = MigrationRequest()
-        # first assign the data passed in / derived above
-        migration_request.user = User.objects.get(name=data["name"])
-        migration_request.label = label
-        migration_request.workspace = data["workspace"]
-        migration_request.request_type = MigrationRequest.REQUEST_MAP[data["request_type"]]
+            # All the checks have been passed so we can now add the request to the JDMA database
+            migration_request.target_path = target_path
 
-        # Assign the stage, this is always on disk at this stage
-        migration_request.stage = MigrationRequest.ON_DISK
+            migration_request.save()
+            # build the return data
+            return_data = data
+            return_data["request_id"] = migration_request.pk
+            return_data["request_type"] = migration_request.request_type
+            return_data["workspace"] = migration_request.migration.workspace
+            return_data["stage"] =  migration_request.migration.stage
+            return_data["registered_date"] = migration_request.date.isoformat()
+            return_data["label"] = migration_request.migration.label
+            return_data["target_path"] = target_path
 
-        # get the date
-        migration_request.registered_date = datetime.utcnow()
+        elif data["request_type"] == "PUT":
+            # check workspace is in request
+            if not "workspace" in data:
+                error_data["error"] = "No workspace supplied."
+                return HttpError(error_data)
 
-        fstat = os.stat(original_path)
+            # check workspace exists?
 
-        # get the unix user id owner of the file
-        migration_request.unix_user_id = pwd.getpwuid(fstat.st_uid).pw_name
+            # check original path is in the request
+            if not "original_path" in data:
+                error_data["error"] = "No directory path supplied."
+                return HttpError(error_data)
+            else:
+                original_path = data["original_path"]
+                # remove any trailing slash
+                if original_path[-1] == "/":
+                    original_path = original_path[:-1]
 
-        # get the unix group id owner of the file
-        migration_request.unix_group_id = grp.getgrgid(fstat.st_gid).gr_name
+                # check that there is not already an entry with this path
+                if Migration.objects.filter(original_path=original_path):
+                    error_data["error"] = "Directory is already in a migration."
+                    return HttpError(error_data)
 
-        # get the unix permissions
-        migration_request.unix_permission = oct(fstat.st_mode & 0777)[1:]
+                # check for the label in the request - if not then derive from directory name
+                if "label" in data:
+                    label = data["label"]
+                else:
+                    label = original_path.split("/")[-1]
 
-        # path
-        migration_request.original_path = original_path
+            # three checks:
+            #   1. Check the path exists (obvs.)
+            #   2. Check the user has write permission to the directory
+            #   3. Check the user has enough space in their ET quota
 
-        # save to the database
-        migration_request.save()
+            # 1. check that the path exists
+            if not os.path.isdir(original_path):
+                error_data["error"] = "Directory path does not exist."
+                return HttpError(error_data)
 
-        # build the return data
-        return_data = data
-        return_data["request_id"] = migration_request.pk
-        return_data["request_type"] = migration_request.request_type
-        return_data["stage"] =  migration_request.stage
-        return_data["registered_date"] = migration_request.registered_date.isoformat()
-        return_data["label"] = migration_request.label
-        return_data["unix_user_id"] = migration_request.unix_user_id
-        return_data["unix_group_id"] = migration_request.unix_group_id
-        return_data["unix_permission"] = migration_request.unix_permission
+            # 2. check that the user has write permissions
+            if not UserHasWritePermission(original_path, data["name"]):
+                error_data["error"] = "User does not have write permission to the directory " + original_path
+                return HttpError(error_data, status=403)
+
+            # 3. check et_quota ** TO DO ** implement this function!
+            if not UserHasETQuota(original_path, data["name"], data["workspace"]):
+                error_data["error"] = "Insufficient remaining Elastic Tape quota."
+                return HttpError(error_data, status=403)
+
+            # All the checks have passed, so we can now add the request to the JDMA database
+            # Create a Migration (all the details of the directory)
+            migration = Migration()
+            migration.user = user
+
+            # Assign the data passed in / derived above
+            migration.label = label
+            migration.workspace = data["workspace"]
+
+            # Assign the stage, this is always on disk at this stage for a PUT
+            migration.stage = Migration.ON_DISK
+
+            # get the date
+            migration.registered_date = cdate
+
+            # get the permissions etc. of the original file
+            fstat = os.stat(original_path)
+
+            # get the unix user id owner of the file
+            migration.unix_user_id = pwd.getpwuid(fstat.st_uid).pw_name
+
+            # get the unix group id owner of the file
+            migration.unix_group_id = grp.getgrgid(fstat.st_gid).gr_name
+
+            # get the unix permissions
+            migration.unix_permission = oct(fstat.st_mode & 0777)[1:]
+
+            # path
+            migration.original_path = original_path
+
+            # save the migration to the database
+            migration.save()
+
+            # associate the migration_request with the migration and save to the database
+            migration_request.migration = migration
+            migration_request.save()
+
+            # build the return data
+            return_data = data
+            return_data["request_id"] = migration.pk
+            return_data["request_type"] = migration_request.request_type
+            return_data["stage"] =  migration.stage
+            return_data["registered_date"] = migration.registered_date.isoformat()
+            return_data["label"] = migration.label
+            return_data["unix_user_id"] = migration.unix_user_id
+            return_data["unix_group_id"] = migration.unix_group_id
+            return_data["unix_permission"] = migration.unix_permission
 
         return HttpResponse(json.dumps(return_data), content_type="application/json")
+
+
+class MigrationView(View):
+    """:rest-api
+
+    Requests to resources concerning migrations in the JASMIN data migration app (JDMA).
+    Note that there is no POST method, as POST to this model is handled by POSTs to MigrationRequestView
+    """
+
+    def get(self, request, *args, **kwargs):
+        """:rest-api"""
+        # if the user name isn't in the request then reject
+        if not "name" in request.GET:
+            return HttpError({"error" : "No name supplied."})
+
+        # return details of a single request
+        if "name" in request.GET and "migration_id" in request.GET:
+            # get the keywords
+            keyargs = {"pk": int(request.GET.get("migration_id")),
+                       "user__name": request.GET.get("name")}
+
+            try:
+                mig = Migration.objects.get(**keyargs)
+            except:
+                # return error as easily interpreted JSON
+                error_data = {"error"  : "Migration not found.",
+                              "migration_id" : keyargs["pk"],
+                              "name"   : keyargs["user__name"]}
+                return HttpError(error_data)
+
+            # full details - these are all the required fields
+            data = {"migration_id": mig.id, "user": mig.user.name,
+                    "workspace": mig.workspace,
+                    "label": mig.label,
+                    "stage": mig.stage}
+            # add the optional data if it's there
+            if mig.et_id:
+                data["et_id"] = mig.et_id
+            if mig.registered_date:
+                data["registered_date"] = mig.registered_date.isoformat()
+            #if mig.tags:
+            #    data["tags"] = mig.tags
+            if mig.original_path:
+                data["original_path"] = mig.original_path
+            if mig.unix_user_id:
+                data["unix_user_id"] = mig.unix_user_id
+            if mig.unix_group_id:
+                data["unix_group_id"] = mig.unix_group_id
+            if mig.unix_permission:
+                data["unix_permission"] = mig.unix_permission
+        else:
+            # return details of all the migrations for this user
+            keyargs = {"user__name": request.GET.get("name")}
+            try:
+                migs = Migration.objects.filter(**keyargs)
+            except:
+                # return error as easily interpreted JSON
+                error_data = {"error"  : "Migrations not found.",
+                              "name"   : keyargs["user__name"]}
+                return HttpError(error_data)
+            # loop over the requests and add to the data at the end
+            migrations = []
+            for m in migs:
+                mig_data = {"migration_id": m.pk, "user": m.user.name,
+                            "workspace": m.workspace,
+                            "label": m.label,
+                            "stage": m.stage}
+                if m.registered_date:
+                    mig_data["registered_date"] = m.registered_date.isoformat()
+                migrations.append(mig_data)
+            data = {"migrations": migrations}
+        return HttpResponse(json.dumps(data), content_type="application/json")
 
 
     def put(self, request, *args, **kwargs):
@@ -558,21 +694,20 @@ class MigrationRequestView(View):
 
            .. http:post:: /jdma_control/api/v1/migration
 
-               Modify a request for a migration to the JDMA.
+               Modify a migration within the JDMA.
 
-               ..
                :param string name: The name of the user who owns the migration request.
-               :param string request_id: (*optional*) The unique id of the migration request.
+               :param string migration_id:  The unique id of the migration.
 
-               :<jsonarr string label: (*optional*) a human readable label for the request.
+               :<jsonarr string label:  a human readable label for the migration.
         """
         # if the user name isn't in the request then reject
         if not "name" in request.GET:
             return HttpError({"error" : "No name supplied."})
 
         # if the user name isn't in the request then reject
-        if not "request_id" in request.GET:
-            return HttpError({"error" : "No request id supplied."})
+        if not "migration_id" in request.GET:
+            return HttpError({"error" : "No migration id supplied."})
 
         # read the data
         data = request.read()
@@ -585,25 +720,25 @@ class MigrationRequestView(View):
             return HttpError(error_data)
 
         # try to get the migration request
-        req_id = int(request.GET.get("request_id"))
+        mig_id = int(request.GET.get("migration_id"))
         username = request.GET.get("name")
         try:
-            migration_request = MigrationRequest.objects.get(pk=req_id)
+            migration = Migration.objects.get(pk=mig_id)
         except:
-            error_data = {"error": "Migration request not found.",
-                          "request_id": req_id,
+            error_data = {"error": "Migration not found.",
+                          "migration_id": mig_id,
                           "name": username}
             return HttpError(error_data)
 
         # check that the migration request belongs to this user
-        if username != migration_request.user.name:
-            error_data = {"error": "User cannot edit this migration request as they do not own it.",
+        if username != migration.user.name:
+            error_data = {"error": "User cannot edit this migration as they do not own it!",
                           "request_id": req_id,
                           "name": username}
             return HttpError(error_data)
 
         # otherwise modify it
-        migration_request.label = data["label"]
-        migration_request.save()
+        migration.label = data["label"]
+        migration.save()
 
         return HttpResponse(json.dumps({"none":"none"}), content_type="application/json")

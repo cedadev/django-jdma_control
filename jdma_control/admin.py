@@ -9,15 +9,23 @@ class UserAdmin(admin.ModelAdmin):
     search_fields = ('name', 'email')
 admin.site.register(User, UserAdmin)
 
-class MigrationRequestAdmin(admin.ModelAdmin):
+class MigrationAdmin(admin.ModelAdmin):
     save_on_top = True
-    list_display  = ('pk','label','user','workspace','request_type','stage','et_id',
-                    'registered_date')
-    list_filter   = ('request_type','stage')
+    list_display  = ('pk','label','user','workspace','stage','et_id', 'registered_date')
+    list_filter   = ('stage','registered_date',)
 
-    fields        = ('user','label','workspace','request_type','stage','et_id','tags',
+    fields        = ('user','label','workspace','stage','et_id', 'tags',
                     'registered_date','unix_user_id','unix_group_id','unix_permission',
                     'original_path')
 
-    search_fields = ('user','label','workspace','request_type','stage','et_id')
+    search_fields = ('user','label','workspace','stage','et_id')
+admin.site.register(Migration, MigrationAdmin)
+
+class MigrationRequestAdmin(admin.ModelAdmin):
+    save_on_top = True
+    list_display = ('pk', 'user', 'request_type','date','migration')
+    list_filter = ('request_type', 'date',)
+
+    fields = ('user', 'request_type', 'date', 'migration', 'target_path')
+    search_fields = ('request_type',)
 admin.site.register(MigrationRequest, MigrationRequestAdmin)
