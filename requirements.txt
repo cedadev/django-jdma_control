@@ -1,0 +1,8 @@
+Django==1.11.4
+django-extensions==1.8.1
+django-multiselectfield==0.1.8
+django-sizefield==0.9.1
+django-taggit==0.22.1
+psycopg2==2.7.3
+pytz==2017.2
+six==1.10.0
