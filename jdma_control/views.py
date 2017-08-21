@@ -635,6 +635,11 @@ class MigrationView(View):
             # get the keywords
             keyargs = {"pk": int(request.GET.get("migration_id")),
                        "user__name": request.GET.get("name")}
+            if "workspace" in request.GET:
+                workspace = request.GET.get("workspace")
+                keyargs["workspace"] = workspace
+            else:
+                workspace = None
 
             try:
                 mig = Migration.objects.get(**keyargs)
@@ -643,6 +648,8 @@ class MigrationView(View):
                 error_data = {"error"  : "Migration not found.",
                               "migration_id" : keyargs["pk"],
                               "name"   : keyargs["user__name"]}
+                if workspace:
+                    error_data["workspace"] = workspace
                 return HttpError(error_data)
 
             # full details - these are all the required fields
@@ -668,12 +675,21 @@ class MigrationView(View):
         else:
             # return details of all the migrations for this user
             keyargs = {"user__name": request.GET.get("name")}
+            if "workspace" in request.GET:
+                workspace = request.GET.get("workspace")
+                keyargs["workspace"] = workspace
+            else:
+                workspace = None
+
             try:
                 migs = Migration.objects.filter(**keyargs)
             except:
                 # return error as easily interpreted JSON
                 error_data = {"error"  : "Migrations not found.",
                               "name"   : keyargs["user__name"]}
+                if workspace:
+                    error_data["workspace"] = workspace
+
                 return HttpError(error_data)
             # loop over the requests and add to the data at the end
             migrations = []
