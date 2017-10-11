@@ -24,21 +24,25 @@ class Migration(models.Model):
     data migration app (JDMA).
     Users register directories from a group workspace (GWS) with the JDMA client via a
     HTTP API.
-    :var models.IntegerField stage: The stage that the directory is at, one of (DLPTMGF):
+    :var models.IntegerField stage: The stage that the directory is at, one of:
 
-       - ** D ** ONDISK (0) The directory is on disk and is writable by the user
+       - ** ONDISK (0) The directory is on disk and is writable by the user
 
-       - ** L ** LOCKED_PUT (1) The directory has been locked and the request is queued to transfer ** TO ** tape
+       - ** PUT_PENDING (1) The directory has been locked and the request is queued to transfer ** TO ** tape
 
-       - ** P ** TAPE_PUT (2) The directory is currently being transferred ** TO ** tape
+       - ** PUTTING (2) The directory is currently being transferred ** TO ** tape
 
-       - ** T ** ONTAPE (3) The directory is on tape
+       - ** VERIFY_PENDING (3) The directory is queued for VERIFYING
 
-       - ** M ** LOCKED_GET (4) The directory has been locked and the request is queued to transfer ** FROM ** tape
+       - ** VERIFYING (4) The files are being fetched back from tape and compared to their SHA256 digests
 
-       - ** G ** TAPE_GET (5) The directory is currently being transferred ** FROM ** tape
+       - ** ONTAPE (5) The directory is on tape
 
-       - ** F ** FAILED (6)
+       - ** GET_PENDING (6) The directory has been locked and the request is queued to transfer ** FROM ** tape
+
+       - ** GETTING (7) The directory is currently being transferred ** FROM ** tape
+
+       - ** FAILED (8)
     """
 
 
@@ -53,14 +57,20 @@ class Migration(models.Model):
     ON_DISK = 0
     PUT_PENDING = 1
     PUTTING = 2
-    ON_TAPE = 3
-    GET_PENDING = 4
-    GETTING = 5
-    FAILED = 6
+    VERIFY_PENDING = 3
+    VERIFY_GETTING = 4
+    VERIFYING = 5
+    ON_TAPE = 6
+    GET_PENDING = 7
+    GETTING = 8
+    FAILED = 9
 
     __STAGE_CHOICES = ((ON_DISK, 'ON_DISK'),
                        (PUT_PENDING, 'PUT_PENDING'),
                        (PUTTING, 'PUTTING'),
+                       (VERIFY_PENDING, 'VERIFY_PENDING'),
+                       (VERIFY_GETTING, 'VERIFY_GETTING'),
+                       (VERIFYING, 'VERIFYING'),
                        (ON_TAPE, 'ON_TAPE'),
                        (GET_PENDING, 'GET_PENDING'),
                        (GETTING, 'GETTING'),
@@ -94,6 +104,11 @@ class Migration(models.Model):
                                      help_text="gid of original owner of directory")
     unix_permission = models.IntegerField(blank=True, null=True,
                                           help_text="File permissions of original directory")
+
+    # failure reason
+    failure_reason = models.CharField(blank=True, null=True, max_length=1024,
+                                      help_text="Reason for failure of request")
+
 
     def __unicode__(self):
         if self.label:
