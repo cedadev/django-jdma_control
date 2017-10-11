@@ -16,7 +16,8 @@ class MigrationAdmin(admin.ModelAdmin):
 
     fields        = ('user','label','workspace','stage','et_id', 'tags',
                     'registered_date','unix_user_id','unix_group_id','unix_permission',
-                    'original_path')
+                    'original_path', 'failure_reason')
+    readonly_fields = ('failure_reason',)
 
     search_fields = ('user','label','workspace','stage','et_id')
 admin.site.register(Migration, MigrationAdmin)
