@@ -145,6 +145,5 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL = 'jdma-control@jdma-control.ceda.ac.uk'
 
 
 # Put your custom settings here.
-ALLOWED_HOSTS=["192.168.51.26", 
+ALLOWED_HOSTS=["192.168.51.26",
                "192.168.51.26"]
-
