@@ -2,6 +2,7 @@ from django.views.generic import View
 from jdma_control.models import *
 from views_functions import *
 from datetime import datetime
+import subprocess
 
 class UserView(View):
     """:rest-api
@@ -365,12 +366,19 @@ class MigrationRequestView(View):
                               "name"   : keyargs["user__name"]}
                 return HttpError(error_data)
 
+            # determine the stage
+            if req.request_type == MigrationRequest.PUT:
+                migration_stage = req.migration.stage
+            elif req.request_type == MigrationRequest.GET:
+                migration_stage = req.stage + 10            # plus 10 to indicate GET
+
             # full details - these are all the required fields
             data = {"request_id": req.id, "user": req.user.name,
                     "request_type": req.request_type,
                     "migration_id": req.migration.pk,
                     "migration_label": req.migration.label,
-                    "stage": req.migration.stage}
+                    "workspace": req.migration.workspace,
+                    "stage": migration_stage}
             if req.date:
                 data["date"] = req.date.isoformat()
         else:
@@ -383,14 +391,22 @@ class MigrationRequestView(View):
                 error_data = {"error"  : "Request not found.",
                               "name"   : keyargs["user__name"]}
                 return HttpError(error_data)
+
             # loop over the requests and add to the data at the end
             requests = []
             for r in reqs:
+                # determine the stage
+                if r.request_type == MigrationRequest.PUT:
+                    migration_stage = r.migration.stage
+                elif r.request_type == MigrationRequest.GET:
+                    migration_stage = r.stage + 10
+
                 req_data = {"request_id": r.pk, "user": r.user.name,
                             "request_type": r.request_type,
                             "migration_id": r.migration.pk,
                             "migration_label": r.migration.label,
-                            "stage": r.migration.stage}
+                            "workspace": r.migration.workspace,
+                            "stage": migration_stage}
                 if r.date:
                     req_data["date"] = r.date.isoformat()
                 requests.append(req_data)
@@ -440,12 +456,12 @@ class MigrationRequestView(View):
             error_data["error"] = "No request type supplied."
             return HttpError(error_data)
 
-        # check request type is "GET", "PUT" or "VERIFY"
-        if not data["request_type"] in ["GET", "PUT", "VERIFY"]:
+        # check request type is "GET", "PUT"
+        if not data["request_type"] in ["GET", "PUT"]:
             error_data["error"] = "Invalid request method."
             return HttpError(error_data)
 
-        # create the MigrationRequest (GET, PUT, VERIFY)
+        # create the MigrationRequest (GET, PUT)
         migration_request = MigrationRequest()
         # assign the user to the MigrationRequest
         migration_request.user = user
@@ -466,25 +482,25 @@ class MigrationRequestView(View):
             #   5. Check there is enough space on disk
 
             #   1. check request id is supplied
-            if not "request_id" in data:
-                error_data["error"] = "No request id supplied."
+            if not "migration_id" in data:
+                error_data["error"] = "No migration id supplied."
                 return HttpError(error_data)
 
             #   2. check request id exists
             try:
-                req = MigrationRequest.objects.get(pk=data["request_id"])
+                mig = Migration.objects.get(pk=data["migration_id"])
             except:
                 error_data["error"] = "Migration not found."
                 return HttpError(error_data)
 
             #   3. check that the stage is ON_TAPE
-            if req.migration.stage != Migration.ON_TAPE:
-                mig_stage = Migration.STAGE_CHOICES[req.migration.stage][1]
+            if mig.stage != Migration.ON_TAPE:
+                mig_stage = Migration.STAGE_CHOICES[mig.stage][1]
                 error_data["error"] = "Migration stage is: " + mig_stage + ".  Cannot retrieve (GET) until stage is ON_TAPE."
                 return HttpError(error_data)
 
             # We don't need to create a migration as we're operating on an existing one - assign it
-            migration_request.migration = req.migration
+            migration_request.migration = mig
 
             #   4. check the user has permission to write to the target directory (or original path if not set)
             # get the target dir
@@ -492,24 +508,39 @@ class MigrationRequestView(View):
                 target_path = data["target_path"]
             else:
                 target_path = migration_request.migration.original_path
+
+            # check if this is a duplicate
+            dup_req = MigrationRequest.objects.filter(migration=mig, target_path=target_path)
+            if len(dup_req) != 0:
+                error_data["error"] = "Duplicate GET request made: Batch ID: {}, Target path: {}".format(mig.et_id, target_path)
+                return HttpError(error_data, status=403)
+
+            # check the target path exists
+            base_path = os.path.dirname(target_path)
+            if not os.path.exists(base_path):
+                error_data["error"] = "Parent of target path does not exist: " + str(base_path)
+                return HttpError(error_data, status=403)
+
             # check the user has permission to write to the directory
-            if not UserHasWritePermission(target_path, data["name"]):
+            if not UserHasWritePermission(base_path, data["name"]):
                 error_data["error"] = "User does not have write permission to the directory: " + str(target_path)
                 return HttpError(error_data, status=403)
 
             #   5. Check there is enough space on disk
             retrieval_size = 0
-            if not UserHasSufficientDiskSpace(target_path, data["name"], retrieval_size): # implement this function
+            if not UserHasSufficientDiskSpace(base_path, data["name"], retrieval_size): # implement this function
                 error_data["error"] = "Insufficient diskpace for the retrieval (GET) " + str(target_path)
                 return HttpError(error_data, status=403)
 
             # All the checks have been passed so we can now add the request to the JDMA database
             migration_request.target_path = target_path
+            migration_request.stage = MigrationRequest.ON_TAPE
 
             migration_request.save()
             # build the return data
             return_data = data
             return_data["request_id"] = migration_request.pk
+            return_data["batch_id"] = migration_request.migration.et_id
             return_data["request_type"] = migration_request.request_type
             return_data["workspace"] = migration_request.migration.workspace
             return_data["stage"] =  migration_request.migration.stage

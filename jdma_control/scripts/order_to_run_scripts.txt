@@ -1,0 +1,34 @@
+In development / test mode:
+
+First become root: `sudo su`
+Then activate the virtual env by invoking: `source /home/vagrant/JDMA/venv/bin/activate`
+
+Then navigate to the JDMA source directory: `cd /Coding/django-jdma_control`
+
+Then run the scripts using ./manage.py runscript <script name>
+
+In the test mode run the scripts in this order:
+
+(To put data)
+                    Migration.stage
+1. jdma_lock        ON_DISK->PUT_PENDING
+2. jdma_transfer    PUT_PENDING->PUTTING
+3. test_rss_gen     generate rss to enable transition in jdma_monitor
+4. jdma_monitor     PUTTING->VERIFY_PENDING
+5. jdma_transfer    VERIFY_PENDING->VERIFY_GETTING
+6. test_rss_gen     generate rss to enable transition in jdma_monitor
+7. jdma_monitor     VERIFY_GETTING->VERIFYING
+8. jdma_verify      VERIFYING->ON_TAPE
+9. jdma_tidy        remove files, intermediary directories (verify) and the
+                    original_path, delete MigrationRequest
+
+(To get data)
+                    MigrationRequest.stage
+1. jdma_lock        ON_TAPE->GET_PENDING
+2. jdma_transfer    GET_PENDING->GETTING
+3. test_rss_gen     generate rss to enable transition in jdma_monitor
+4. jdma_monitor     GETTING->ON_DISK
+5. jdma_tidy        set permissions and owner back on downloaded directory,
+                    delete MigrationRequest
+
+In the deployment mode the scripts will be run by cron
