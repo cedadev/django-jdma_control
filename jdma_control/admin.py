@@ -11,7 +11,7 @@ admin.site.register(User, UserAdmin)
 
 class MigrationAdmin(admin.ModelAdmin):
     save_on_top = True
-    list_display  = ('pk','label','user','workspace','stage','et_id', 'registered_date')
+    list_display  = ('pk','label', 'user', 'stage', 'workspace','et_id', 'registered_date')
     list_filter   = ('stage','registered_date',)
 
     fields        = ('user','label','workspace','stage','et_id', 'tags',
@@ -24,9 +24,9 @@ admin.site.register(Migration, MigrationAdmin)
 
 class MigrationRequestAdmin(admin.ModelAdmin):
     save_on_top = True
-    list_display = ('pk', 'user', 'request_type','date','migration')
+    list_display = ('pk', 'user', 'request_type', 'stage', 'date','migration')
     list_filter = ('request_type', 'date',)
 
-    fields = ('user', 'request_type', 'date', 'migration', 'target_path')
+    fields = ('user', 'request_type', 'stage', 'date', 'migration', 'target_path')
     search_fields = ('request_type',)
 admin.site.register(MigrationRequest, MigrationRequestAdmin)

@@ -53,7 +53,11 @@ class Migration(models.Model):
     workspace = models.CharField(max_length=2024,
                                  help_text="Workspace used for this request")
 
-    # stages for tape transfer
+    # stages for tape transfer - to tape.  There is a strict one to one mapping
+    # for the data->tape record, and therefore a one to one mapping for the
+    # data and the PUT migration.
+    # For the GET migration, there may be many requests for one migration and
+    # so the GET stages are in the migration request model
     ON_DISK = 0
     PUT_PENDING = 1
     PUTTING = 2
@@ -61,9 +65,7 @@ class Migration(models.Model):
     VERIFY_GETTING = 4
     VERIFYING = 5
     ON_TAPE = 6
-    GET_PENDING = 7
-    GETTING = 8
-    FAILED = 9
+    FAILED = 7
 
     __STAGE_CHOICES = ((ON_DISK, 'ON_DISK'),
                        (PUT_PENDING, 'PUT_PENDING'),
@@ -72,11 +74,9 @@ class Migration(models.Model):
                        (VERIFY_GETTING, 'VERIFY_GETTING'),
                        (VERIFYING, 'VERIFYING'),
                        (ON_TAPE, 'ON_TAPE'),
-                       (GET_PENDING, 'GET_PENDING'),
-                       (GETTING, 'GETTING'),
                        (FAILED, 'FAILED'))
     STAGE_CHOICES = __STAGE_CHOICES
-    stage = models.IntegerField(choices=__STAGE_CHOICES)
+    stage = models.IntegerField(choices=__STAGE_CHOICES, default=FAILED)
 
     # batch id for elastic tape
     et_id = models.IntegerField(blank=True,null=True,
@@ -122,15 +122,27 @@ class MigrationRequest(models.Model):
     # request type - GET or PUT or ?VERIFY?
     PUT = 0
     GET = 1
-    VERIFY = 2
 
     __REQUEST_CHOICES = ((PUT, 'PUT'),
-                         (GET, 'GET'),
-                         (VERIFY, 'VERIFY'))
+                         (GET, 'GET'))
     REQUEST_MAP = {"PUT" : PUT,
-                   "GET" : GET,
-                   "VERIFY" : VERIFY}
+                   "GET" : GET}
     request_type = models.IntegerField(choices=__REQUEST_CHOICES)
+
+    ON_TAPE = 0
+    GET_PENDING = 1
+    GETTING = 2
+    ON_DISK = 3
+    FAILED  = 4
+
+    __REQ_STAGE_CHOICES = ((ON_TAPE, 'ON_TAPE'),
+                           (GET_PENDING, 'GET_PENDING'),
+                           (GETTING, 'GETTING'),
+                           (ON_DISK, 'ON_DISK'),
+                           (FAILED, 'FAILED'))
+
+    REQ_STAGE_CHOICES = __REQ_STAGE_CHOICES
+    stage = models.IntegerField(choices=__REQ_STAGE_CHOICES, default=ON_TAPE)
 
     # user that the request belongs to
     user = models.ForeignKey(User, help_text="User that the request belongs to")
@@ -146,3 +158,10 @@ class MigrationRequest(models.Model):
     # mapping to the migration details
     migration = models.ForeignKey(Migration, null=True,
                                   help_text="Migration associated with this MigrationRequest")
+
+    # failure reason
+    failure_reason = models.CharField(blank=True, null=True, max_length=1024,
+                                      help_text="Reason for failure of request")
+
+    def __unicode__(self):
+        return "{:>4} : {:16}".format(self.pk, self.request_type)
