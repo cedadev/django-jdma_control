@@ -8,15 +8,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-DEBUG = False
-# Security settings
-SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_BROWSER_XSS_FILTER = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
-CSRF_COOKIE_HTTPONLY = True
-X_FRAME_OPTIONS = 'DENY'
-ALLOWED_HOSTS = ['192.168.51.26']
+DEBUG = True
 
 
 # Read the secret key from a file
@@ -26,35 +18,6 @@ with open(SECRET_KEY_FILE) as f:
 
 
 # Logging settings
-LOG_FORMAT = '[%(levelname)s] [%(asctime)s] [%(name)s:%(lineno)s] [%(threadName)s] %(message)s'
-LOGGING_CONFIG = None
-LOGGING = {
-    'version' : 1,
-    'disable_existing_loggers' : False,
-    'formatters' : {
-        'generic' : {
-            'format' : LOG_FORMAT,
-        },
-        'slack' : {
-            'format' : '`' + LOG_FORMAT + '`',
-        },
-    },
-    'handlers' : {
-        'stdout' : {
-            'class' : 'logging.StreamHandler',
-            'formatter' : 'generic',
-        },
-            },
-    'loggers' : {
-        '' : {
-                        'handlers' : ['stdout'],
-                        'level' : 'INFO',
-            'propogate' : True,
-        },
-    },
-}
-import logging.config
-logging.config.dictConfig(LOGGING)
 
 
 # Application definition
