@@ -1,6 +1,6 @@
 from django.views.generic import View
 from jdma_control.models import *
-from views_functions import *
+from jdma_control.views_functions import *
 from datetime import datetime
 import subprocess
 
@@ -622,7 +622,7 @@ class MigrationRequestView(View):
             migration.unix_group_id = grp.getgrgid(fstat.st_gid).gr_name
 
             # get the unix permissions
-            migration.unix_permission = oct(fstat.st_mode & 0777)[1:]
+            migration.unix_permission = oct(fstat.st_mode & 0o777)[1:]
 
             # path
             migration.original_path = original_path

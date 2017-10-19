@@ -1,5 +1,5 @@
 from django.conf.urls import url
-from views import *
+from jdma_control.views import *
 
 urlpatterns = (
     url(r'^api/v1/user', UserView.as_view()),
