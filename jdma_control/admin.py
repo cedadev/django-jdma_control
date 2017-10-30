@@ -11,11 +11,12 @@ admin.site.register(User, UserAdmin)
 
 class MigrationAdmin(admin.ModelAdmin):
     save_on_top = True
-    list_display  = ('pk','label', 'user', 'stage', 'workspace','et_id', 'registered_date')
+    list_display  = ('pk','label', 'user', 'stage', 'workspace','et_id', 'registered_date', 'permission')
     list_filter   = ('stage','registered_date',)
 
     fields        = ('user','label','workspace','stage','et_id', 'tags',
-                    'registered_date','unix_user_id','unix_group_id','unix_permission',
+                    'registered_date','permission',
+                    'unix_user_id','unix_group_id','unix_permission',
                     'original_path', 'failure_reason')
     readonly_fields = ('failure_reason',)
 

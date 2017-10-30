@@ -9,11 +9,11 @@ import random
 from shutil import copy2
 import time
 
-from jdma_control.settings import FAKE_ET_DIR
+from jdma_site.settings import FAKE_ET_DIR
 
 def Usage():
-    print "Usage:"
-    print "    et_put.py [ -v ] [ -c ] [ -l logfile ] [ -h hostname ] [ -p port ] [ -w workspace ] [ -t tag ] [-t one-word-tag] { -f sourcefilelist | source... }"
+    print("Usage:")
+    print("    et_put.py [ -v ] [ -c ] [ -l logfile ] [ -h hostname ] [ -p port ] [ -w workspace ] [ -t tag ] [-t one-word-tag] { -f sourcefilelist | source... }")
     sys.exit(1)
 
 
@@ -56,8 +56,8 @@ if __name__ == "__main__":
     workspace = ''
     try:
         opts, args = getopt.getopt(sys.argv[1:], 'w:l:f:')
-    except getopt.GetoptError, err:
-        print str(err)
+    except getopt.GetoptError as err:
+        print(str(err))
         Usage()
 
     for o, a in opts:
@@ -69,8 +69,8 @@ if __name__ == "__main__":
     if sourcefilelist is not None:
         batch_id = put_to_fake_et(sourcefilelist)
         if batch_id == -1:
-            print "BATCH REJECTED"
+            print("BATCH REJECTED")
         else:
-            print "Batch ID: %i" % batch_id
+            print("Batch ID: %i" % batch_id)
     else:
         Usage()

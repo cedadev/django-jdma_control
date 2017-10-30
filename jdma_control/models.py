@@ -2,7 +2,10 @@ from __future__ import unicode_literals
 
 from django.db import models
 from taggit.managers import TaggableManager
+from django.utils.encoding import python_2_unicode_compatible
 
+
+@python_2_unicode_compatible
 class User(models.Model):
     """User of the JASMIN data migration app (JDMA).
     Users register directories from a group workspace (GWS) with the JDMA client via a
@@ -15,10 +18,11 @@ class User(models.Model):
     email = models.EmailField(max_length=254, help_text="Email of user")
     notify = models.BooleanField(default=True, help_text="Switch notifications on / off")
 
-    def __unicode__(self):
+    def __str__(self):
         return "%s (%s)" % (self.name, self.email)
 
 
+@python_2_unicode_compatible
 class Migration(models.Model):
     """A data model to store the details of a directory that has been migrated via the JASMIN
     data migration app (JDMA).
@@ -67,16 +71,25 @@ class Migration(models.Model):
     ON_TAPE = 6
     FAILED = 7
 
-    __STAGE_CHOICES = ((ON_DISK, 'ON_DISK'),
-                       (PUT_PENDING, 'PUT_PENDING'),
-                       (PUTTING, 'PUTTING'),
-                       (VERIFY_PENDING, 'VERIFY_PENDING'),
-                       (VERIFY_GETTING, 'VERIFY_GETTING'),
-                       (VERIFYING, 'VERIFYING'),
-                       (ON_TAPE, 'ON_TAPE'),
-                       (FAILED, 'FAILED'))
-    STAGE_CHOICES = __STAGE_CHOICES
-    stage = models.IntegerField(choices=__STAGE_CHOICES, default=FAILED)
+    STAGE_CHOICES = ((ON_DISK, 'ON_DISK'),
+                     (PUT_PENDING, 'PUT_PENDING'),
+                     (PUTTING, 'PUTTING'),
+                     (VERIFY_PENDING, 'VERIFY_PENDING'),
+                     (VERIFY_GETTING, 'VERIFY_GETTING'),
+                     (VERIFYING, 'VERIFYING'),
+                     (ON_TAPE, 'ON_TAPE'),
+                     (FAILED, 'FAILED'))
+    stage = models.IntegerField(choices=STAGE_CHOICES, default=FAILED)
+
+    # CHOICES for the permissions for batches
+    PERMISSION_PRIVATE = 0      # only the user can download / request the migrations
+    PERMISSION_GROUP = 1        # anyone in the group workspace can request
+    PERMISSION_ALL = 2          # anyone can request it
+
+    PERMISSION_CHOICES = ((PERMISSION_PRIVATE, 'PRIVATE'),
+                          (PERMISSION_GROUP, 'GROUP'),
+                          (PERMISSION_ALL, 'ALL'))
+    permission = models.IntegerField(choices=PERMISSION_CHOICES, default=PERMISSION_PRIVATE)
 
     # batch id for elastic tape
     et_id = models.IntegerField(blank=True,null=True,
@@ -110,13 +123,14 @@ class Migration(models.Model):
                                       help_text="Reason for failure of request")
 
 
-    def __unicode__(self):
+    def __str__(self):
         if self.label:
             return "{:>4} : {:16}".format(self.pk, self.label)
         else:
             return "{:>4}".format(self.pk)
 
 
+@python_2_unicode_compatible
 class MigrationRequest(models.Model):
     """A request to migrate (PUT) or retrieve (GET) a directory via the JASMIN data migration app (JDMA)."""
     # request type - GET or PUT or ?VERIFY?
@@ -135,14 +149,13 @@ class MigrationRequest(models.Model):
     ON_DISK = 3
     FAILED  = 4
 
-    __REQ_STAGE_CHOICES = ((ON_TAPE, 'ON_TAPE'),
-                           (GET_PENDING, 'GET_PENDING'),
-                           (GETTING, 'GETTING'),
-                           (ON_DISK, 'ON_DISK'),
-                           (FAILED, 'FAILED'))
+    REQ_STAGE_CHOICES = ((ON_TAPE, 'ON_TAPE'),
+                         (GET_PENDING, 'GET_PENDING'),
+                         (GETTING, 'GETTING'),
+                         (ON_DISK, 'ON_DISK'),
+                         (FAILED, 'FAILED'))
 
-    REQ_STAGE_CHOICES = __REQ_STAGE_CHOICES
-    stage = models.IntegerField(choices=__REQ_STAGE_CHOICES, default=ON_TAPE)
+    stage = models.IntegerField(choices=REQ_STAGE_CHOICES, default=ON_TAPE)
 
     # user that the request belongs to
     user = models.ForeignKey(User, help_text="User that the request belongs to")
@@ -163,5 +176,5 @@ class MigrationRequest(models.Model):
     failure_reason = models.CharField(blank=True, null=True, max_length=1024,
                                       help_text="Reason for failure of request")
 
-    def __unicode__(self):
+    def __str__(self):
         return "{:>4} : {:16}".format(self.pk, self.request_type)

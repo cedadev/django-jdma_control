@@ -6,12 +6,12 @@ import os
 import getopt
 import sys
 
-from jdma_control.settings import FAKE_ET_DIR
+from jdma_site.settings import FAKE_ET_DIR
 from shutil import copy
 
 def Usage():
-    print "Usage:"
-    print "    et_get.py [ -v ] [ -t threads ] [ -l logfile ] [ -h hostname ] [ -p port ] [ -w workspace ] { -d dataset | -f sourcefile | -b batchID } [ -r restoredirectory ]"
+    print("Usage:")
+    print("    et_get.py [ -v ] [ -t threads ] [ -l logfile ] [ -h hostname ] [ -p port ] [ -w workspace ] { -d dataset | -f sourcefile | -b batchID } [ -r restoredirectory ]")
     sys.exit(1)
 
 
@@ -47,8 +47,8 @@ if __name__ == "__main__":
     workspace = ''
     try:
         opts, args = getopt.getopt(sys.argv[1:], 'b:r:l:w:')
-    except getopt.GetoptError, err:
-        print str(err)
+    except getopt.GetoptError as err:
+        print(str(err))
         Usage()
 
     for o, a in opts:
@@ -57,7 +57,7 @@ if __name__ == "__main__":
         elif o == "-r":
             target_dir = a
             if not os.access(target_dir, os.W_OK):
-                print "No permission to write to target directory"
+                print("No permission to write to target directory")
                 Usage()
         elif o == "-b":
             batch_id = int(a)
