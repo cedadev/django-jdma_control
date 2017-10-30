@@ -12,9 +12,9 @@ import os
 import logging
 import shutil
 
-import jdma_control.settings as settings
+import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
-from jdma_lock import setup_logging
+from jdma_control.scripts.jdma_lock import setup_logging
 
 def remove_verification_files():
     """Remove those temporary files that have been created in the verification step"""
@@ -82,6 +82,17 @@ def remove_put_requests():
             logging.info("TIDY: deleting PUT request {}".format(pr.pk))
             pr.delete()
 
+
+def remove_get_requests():
+    """Remove the get requests that are ON_DISK"""
+    get_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.GET)
+    for gr in get_reqs:
+        # only do it if the files are on tape
+        if gr.migration.stage == Migration.ON_DISK:
+            logging.info("TIDY: deleting GET request {}".format(gr.pk))
+            gr.delete()
+
+
 def run():
     setup_logging(__name__)
     # these are individual loops to aid debugging and so we can turn them
@@ -90,3 +101,4 @@ def run():
     remove_file_list_digest()
     remove_original_files()
     remove_put_requests()
+    remove_get_requests()

@@ -6,7 +6,7 @@ import os
 from feedgen.feed import FeedGenerator
 from datetime import datetime
 
-import jdma_control.settings as settings
+import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 
 
@@ -43,15 +43,6 @@ def gen_test_feed():
         elif pr.migration.stage == Migration.VERIFY_GETTING:
             batch_id = pr.migration.et_id
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            # output the retrieval completed message first
-            fe = fg.add_entry()
-            batch_url = 'http://et-monitor.fds.rl.ac.uk/et_user/ET_AlertWatch.php#alert_id_{}'.format(c_alert)
-            fe.title('Retrieval request {} by {} completed.'.format(pr.pk, pr.user.name))
-            ret_comp_desc = "Retrieval request {} by {} completed at {} with {}".format(pr.pk, pr.user.name, current_time, 0)
-            fe.id(batch_url)
-            fe.link(href=batch_url, rel='alternate')
-            fe.description(ret_comp_desc)
-            c_alert += 1
             # now output the retrieval mapping message
             fe = fg.add_entry()
             batch_url = 'http://et-monitor.fds.rl.ac.uk/et_user/ET_AlertWatch.php#alert_id_{}'.format(c_alert)
@@ -62,6 +53,16 @@ def gen_test_feed():
             fe.description(ret_map_desc)
             c_alert += 1
 
+            # output the retrieval completed message first
+            fe = fg.add_entry()
+            batch_url = 'http://et-monitor.fds.rl.ac.uk/et_user/ET_AlertWatch.php#alert_id_{}'.format(c_alert)
+            fe.title('Retrieval request {} by {} completed.'.format(pr.pk, pr.user.name))
+            ret_comp_desc = "Retrieval request {} by {} completed at {} with {}".format(pr.pk, pr.user.name, current_time, 0)
+            fe.id(batch_url)
+            fe.link(href=batch_url, rel='alternate')
+            fe.description(ret_comp_desc)
+            c_alert += 1
+
     # Generate the GET rss feed
     get_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.GET)
 
@@ -70,15 +71,6 @@ def gen_test_feed():
             # get the et id and current_time
             batch_id = gr.migration.et_id
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            # output the retrieval completed message first
-            fe = fg.add_entry()
-            batch_url = 'http://et-monitor.fds.rl.ac.uk/et_user/ET_AlertWatch.php#alert_id_{}'.format(c_alert)
-            fe.title('Retrieval request {} by {} completed.'.format(gr.pk, gr.user.name))
-            ret_comp_desc = "Retrieval request {} by {} completed at {} with {}".format(gr.pk, gr.user.name, current_time, 0)
-            fe.id(batch_url)
-            fe.link(href=batch_url, rel='alternate')
-            fe.description(ret_comp_desc)
-            c_alert += 1
             # now output the retrieval mapping message
             fe = fg.add_entry()
             batch_url = 'http://et-monitor.fds.rl.ac.uk/et_user/ET_AlertWatch.php#alert_id_{}'.format(c_alert)
@@ -87,6 +79,15 @@ def gen_test_feed():
             fe.id(batch_url)
             fe.link(href=batch_url, rel='alternate')
             fe.description(ret_map_desc)
+            c_alert += 1
+            # output the retrieval completed message first
+            fe = fg.add_entry()
+            batch_url = 'http://et-monitor.fds.rl.ac.uk/et_user/ET_AlertWatch.php#alert_id_{}'.format(c_alert)
+            fe.title('Retrieval request {} by {} completed.'.format(gr.pk, gr.user.name))
+            ret_comp_desc = "Retrieval request {} by {} completed at {} with {}".format(gr.pk, gr.user.name, current_time, 0)
+            fe.id(batch_url)
+            fe.link(href=batch_url, rel='alternate')
+            fe.description(ret_comp_desc)
             c_alert += 1
 
     fg.rss_file(settings.ET_RSS_FILE)

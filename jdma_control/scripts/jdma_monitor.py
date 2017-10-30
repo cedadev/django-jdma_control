@@ -12,11 +12,15 @@ import feedparser
 import os
 import re
 import logging
+import subprocess
 from datetime import datetime
 
-import jdma_control.settings as settings
+import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
-from jdma_lock import setup_logging
+from jdma_control.scripts.jdma_lock import setup_logging
+
+from jasmin_ldap.core import *
+from jasmin_ldap.query import *
 
 # statuses for the RSS items
 PUT_COMPLETE = 0
@@ -35,6 +39,9 @@ class rss_item_status:
 
     def __eq__(self, rhs):
         return self.id == rhs
+
+    def __str__(self):
+        return str(self.status) + " " + str(self.date) + " " + str(self.id)
 
 
 def interpret_rss_status(item_desc):
@@ -56,6 +63,7 @@ def interpret_rss_status(item_desc):
     put_match = re.match(put_rx, item_desc)
     get_match = re.match(get_rx, item_desc)
     map_match = re.match(map_rx, item_desc)
+
 
     # check which one matched and process
     if put_match is not None:
@@ -115,6 +123,9 @@ def monitor_put(completed_PUTs):
 def monitor_get(completed_GETs):
     """Monitor the GETs and transition from GETTING to ON_DISK (or FAILED)"""
     get_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.GET)
+    # get the ldap servers
+    ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY, settings.JDMA_LDAP_REPLICAS)
+
     for gr in get_reqs:
         if gr.stage == MigrationRequest.GETTING:
             if gr.migration.et_id in completed_GETs:
@@ -122,6 +133,42 @@ def monitor_get(completed_GETs):
                 # can be downloaded by multiple MigrationRequests
                 # The only way to check is to make sure all the files in the
                 # original migration are present in the target_dir
+                # change the owner, group and permissions of the file to match that of the original
+                # form the user query
+                with Connection.create(ldap_servers) as conn:
+                    # query for the user
+                    query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_USER).filter(uid=gr.migration.unix_user_id)
+                    # check for a valid return
+                    if len(query) == 0:
+                        logging.error("Unix user id: {} not found from LDAP in monitor_get".format(gr.migration.unix_user_id))
+                        raise Exception
+                    # use just the first returned result
+                    q = query[0]
+                    # # check that the keys exist in q
+                    if not ("uidNumber" in q):
+                        logging.error("uidNumber not in returned LDAP query for user id {}".format(gr.migration.unix_user_id))
+                        raise Exception
+                    else:
+                        uidNumber = q["uidNumber"][0]
+
+                    # query for the group
+                    query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_GROUP).filter(cn=gr.migration.unix_group_id)
+                    # check for a valid return
+                    if len(query) == 0:
+                        logging.error("Unix group id: {} not found from LDAP in monitor_get".format(gr.migration.unix_group_id))
+                        raise Exception
+                    # use just the first returned result
+                    q = query[0]
+                    # check that the keys exist in q
+                    if not ("gidNumber" in q):
+                        logging.error("gidNumber not in returned LDAP query for group id {}".format(gr.migration.unix_group_id))
+                        raise Exception
+                    else:
+                        gidNumber = q["gidNumber"][0]
+
+                    # change the directory owner / group
+                    subprocess.call(["/usr/bin/sudo", "/bin/chown", "-R", str(uidNumber)+":"+str(gidNumber), gr.target_path])
+
                 gr.stage = MigrationRequest.ON_DISK
                 gr.save()
                 logging.info("Transition: request ID: {} GETTING->ON_DISK".format(gr.pk))

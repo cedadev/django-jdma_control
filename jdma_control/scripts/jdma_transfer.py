@@ -12,10 +12,10 @@ import os
 import subprocess
 import logging
 
-import jdma_control.settings as settings
+import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
-from jdma_lock import setup_logging
-from jdma_verify import calculate_digest
+from jdma_control.scripts.jdma_lock import setup_logging
+from jdma_control.scripts.jdma_verify import calculate_digest
 
 def put_transfers():
     # first check the file list directory exists

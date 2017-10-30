@@ -4,6 +4,11 @@ from jdma_control.views_functions import *
 from datetime import datetime
 import subprocess
 
+from jasmin_ldap.core import *
+from jasmin_ldap.query import *
+
+import jdma_site.settings as settings
+
 class UserView(View):
     """:rest-api
 
@@ -477,9 +482,13 @@ class MigrationRequestView(View):
             # checks
             #   1. Check that the request id is supplied
             #   2. Check that the request exists
-            #   3. Check that the stage is ON_TAPE
-            #   4. Check the user has permission to write to the target directory (or original path if not set)
-            #   5. Check there is enough space on disk
+            #   3. Check that the request belongs to the user, or has group or universal permission
+            #   4. Check that the stage is ON_TAPE
+            #   5. Check the user has permission to write to the target directory (or original path if not set)
+            #   6. Check whether this is a duplicate
+            #   7. Check that the target path exists
+            #   8. Check that the user has permission to write to the target directory
+            #   9. Check there is enough space on disk
 
             #   1. check request id is supplied
             if not "migration_id" in data:
@@ -493,7 +502,30 @@ class MigrationRequestView(View):
                 error_data["error"] = "Migration not found."
                 return HttpError(error_data)
 
-            #   3. check that the stage is ON_TAPE
+            #   3. check that the migration belongs to the user, or has group or universal permission
+            if mig.permission == Migration.PERMISSION_PRIVATE:
+                if mig.user.name != user.name:
+                    error_data["error"] = "User: " + user.name + " does not have permission to request the migration."
+                    return HttpError(error_data)
+
+            if mig.permission == Migration.PERMISSION_GROUP:
+                # check that the user is in a group that matches the workspace
+                # get the users in the workspace group
+                # create server pool first
+                ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY, settings.JDMA_LDAP_REPLICAS)
+                with Connection.create(ldap_servers) as conn:
+                    query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_GROUP).filter(cn=mig.workspace)
+
+                    # check for a valid return
+                    if len(query) == 0:
+                        logging.error("Group workspace: {} not found from LDAP".format(mig.workspace))
+                        raise Exception
+
+                    if not user.name in query[0]['memberUid']:
+                        error_data["error"] = "User: " + user.name + " does not have permission to request the migration."
+                        return HttpError(error_data)
+
+            #   4. check that the stage is ON_TAPE
             if mig.stage != Migration.ON_TAPE:
                 mig_stage = Migration.STAGE_CHOICES[mig.stage][1]
                 error_data["error"] = "Migration stage is: " + mig_stage + ".  Cannot retrieve (GET) until stage is ON_TAPE."
@@ -502,31 +534,31 @@ class MigrationRequestView(View):
             # We don't need to create a migration as we're operating on an existing one - assign it
             migration_request.migration = mig
 
-            #   4. check the user has permission to write to the target directory (or original path if not set)
+            #   5. check the user has permission to write to the target directory (or original path if not set)
             # get the target dir
             if "target_path" in data:
                 target_path = data["target_path"]
             else:
                 target_path = migration_request.migration.original_path
 
-            # check if this is a duplicate
+            #   6. check if this is a duplicate
             dup_req = MigrationRequest.objects.filter(migration=mig, target_path=target_path)
             if len(dup_req) != 0:
                 error_data["error"] = "Duplicate GET request made: Batch ID: {}, Target path: {}".format(mig.et_id, target_path)
                 return HttpError(error_data, status=403)
 
-            # check the target path exists
+            #   7. check the target path exists
             base_path = os.path.dirname(target_path)
             if not os.path.exists(base_path):
                 error_data["error"] = "Parent of target path does not exist: " + str(base_path)
                 return HttpError(error_data, status=403)
 
-            # check the user has permission to write to the directory
+            #   8. check the user has permission to write to the directory
             if not UserHasWritePermission(base_path, data["name"]):
                 error_data["error"] = "User does not have write permission to the directory: " + str(target_path)
                 return HttpError(error_data, status=403)
 
-            #   5. Check there is enough space on disk
+            #   9. Check there is enough space on disk
             retrieval_size = 0
             if not UserHasSufficientDiskSpace(base_path, data["name"], retrieval_size): # implement this function
                 error_data["error"] = "Insufficient diskpace for the retrieval (GET) " + str(target_path)
@@ -622,7 +654,7 @@ class MigrationRequestView(View):
             migration.unix_group_id = grp.getgrgid(fstat.st_gid).gr_name
 
             # get the unix permissions
-            migration.unix_permission = oct(fstat.st_mode & 0o777)[1:]
+            migration.unix_permission = (fstat.st_mode & 0o777)
 
             # path
             migration.original_path = original_path
@@ -687,7 +719,8 @@ class MigrationView(View):
             data = {"migration_id": mig.id, "user": mig.user.name,
                     "workspace": mig.workspace,
                     "label": mig.label,
-                    "stage": mig.stage}
+                    "stage": mig.stage,
+                    "permission": mig.permission}
             # add the optional data if it's there
             if mig.et_id:
                 data["et_id"] = mig.et_id
@@ -728,7 +761,8 @@ class MigrationView(View):
                 mig_data = {"migration_id": m.pk, "user": m.user.name,
                             "workspace": m.workspace,
                             "label": m.label,
-                            "stage": m.stage}
+                            "stage": m.stage,
+                            "permission": m.permission}
                 if m.registered_date:
                     mig_data["registered_date"] = m.registered_date.isoformat()
                 migrations.append(mig_data)
@@ -762,8 +796,16 @@ class MigrationView(View):
         # copy data to error_data
         error_data = data
 
-        if not "label" in data:
+        if "label" in data and data["label"] == "":
             error_data["error"] = "No label supplied."
+            return HttpError(error_data)
+
+        if "permission" in data and data["permission"] == "":
+            error_data["error"] = "No permission supplied."
+            return HttpError(error_data)
+
+        if "permission" in data and not data["permission"] in ["ALL", "PRIVATE", "GROUP"]:
+            error_data["error"] = "Permission has to be one of ALL | PRIVATE | GROUP"
             return HttpError(error_data)
 
         # try to get the migration request
@@ -780,12 +822,21 @@ class MigrationView(View):
         # check that the migration request belongs to this user
         if username != migration.user.name:
             error_data = {"error": "User cannot edit this migration as they do not own it!",
-                          "request_id": req_id,
+                          "request_id": mig_id,
                           "name": username}
             return HttpError(error_data)
 
         # otherwise modify it
-        migration.label = data["label"]
+        if "label" in data:
+            migration.label = data["label"]
+
+        if "permission" in data:
+            if data["permission"] == "ALL":
+                migration.permission = Migration.PERMISSION_ALL
+            elif data["permission"] == "PRIVATE":
+                migration.permission = Migration.PERMISSION_PRIVATE
+            elif data["permission"] == "GROUP":
+                migration.permission = Migration.PERMISSION_GROUP
         migration.save()
 
         return HttpResponse(json.dumps({"none":"none"}), content_type="application/json")

@@ -10,7 +10,7 @@ import logging
 import subprocess
 import os
 
-import jdma_control.settings as settings
+import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 
 
@@ -20,6 +20,10 @@ def setup_logging(module_name):
         log_path = settings.LOG_PATH
     except:
         log_path = "./"
+
+    # Make the logging dir if it doesn't exist
+    if not os.path.isdir(log_path):
+        os.makedirs(log_path)
 
     date = datetime.datetime.utcnow()
     date_string = "%d%02i%02iT%02i%02i%02i" % (date.year, date.month, date.day, date.hour, date.minute, date.second)
