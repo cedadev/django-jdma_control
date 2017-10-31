@@ -477,6 +477,9 @@ class MigrationRequestView(View):
         # set the date
         migration_request.date = cdate
 
+        # create the LDAP server pool needed in both GET and PUT requests
+        ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY, settings.JDMA_LDAP_REPLICAS)
+
         # now choose what to do based on the request
         if data["request_type"] == "GET":
             # checks
@@ -492,43 +495,40 @@ class MigrationRequestView(View):
 
             #   1. check request id is supplied
             if not "migration_id" in data:
-                error_data["error"] = "No migration id supplied."
+                error_data["error"] = "No batch id supplied."
                 return HttpError(error_data)
 
             #   2. check request id exists
             try:
                 mig = Migration.objects.get(pk=data["migration_id"])
             except:
-                error_data["error"] = "Migration not found."
+                error_data["error"] = "Batch not found."
                 return HttpError(error_data)
 
             #   3. check that the migration belongs to the user, or has group or universal permission
             if mig.permission == Migration.PERMISSION_PRIVATE:
                 if mig.user.name != user.name:
-                    error_data["error"] = "User: " + user.name + " does not have permission to request the migration."
+                    error_data["error"] = "User " + user.name + " does not have permission to request the batch."
                     return HttpError(error_data)
 
             if mig.permission == Migration.PERMISSION_GROUP:
                 # check that the user is in a group that matches the workspace
                 # get the users in the workspace group
-                # create server pool first
-                ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY, settings.JDMA_LDAP_REPLICAS)
                 with Connection.create(ldap_servers) as conn:
                     query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_GROUP).filter(cn=mig.workspace)
 
                     # check for a valid return
                     if len(query) == 0:
                         logging.error("Group workspace: {} not found from LDAP".format(mig.workspace))
-                        raise Exception
 
-                    if not user.name in query[0]['memberUid']:
-                        error_data["error"] = "User: " + user.name + " does not have permission to request the migration."
+                    if len(query) == 0 or not user.name in query[0]['memberUid']:
+                        error_data["error"] = "User " + user.name + " does not have permission to request the batch."
                         return HttpError(error_data)
 
             #   4. check that the stage is ON_TAPE
             if mig.stage != Migration.ON_TAPE:
                 mig_stage = Migration.STAGE_CHOICES[mig.stage][1]
-                error_data["error"] = "Migration stage is: " + mig_stage + ".  Cannot retrieve (GET) until stage is ON_TAPE."
+                error_data["error"] = "Batch stage is: " + mig_stage + ".  Cannot retrieve (GET) until stage is ON_TAPE."
                 return HttpError(error_data)
 
             # We don't need to create a migration as we're operating on an existing one - assign it
@@ -555,13 +555,13 @@ class MigrationRequestView(View):
 
             #   8. check the user has permission to write to the directory
             if not UserHasWritePermission(base_path, data["name"]):
-                error_data["error"] = "User does not have write permission to the directory: " + str(target_path)
+                error_data["error"] = "User " + data["name"] + " does not have write permission to the directory: " + str(target_path)
                 return HttpError(error_data, status=403)
 
             #   9. Check there is enough space on disk
             retrieval_size = 0
             if not UserHasSufficientDiskSpace(base_path, data["name"], retrieval_size): # implement this function
-                error_data["error"] = "Insufficient diskpace for the retrieval (GET) " + str(target_path)
+                error_data["error"] = "Insufficient diskspace for the retrieval (GET) " + str(target_path)
                 return HttpError(error_data, status=403)
 
             # All the checks have been passed so we can now add the request to the JDMA database
@@ -586,7 +586,20 @@ class MigrationRequestView(View):
                 error_data["error"] = "No workspace supplied."
                 return HttpError(error_data)
 
-            # check workspace exists?
+            # check workspace exists - get the group for the workspace from LDAP
+            with Connection.create(ldap_servers) as conn:
+                query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_GROUP).filter(cn=data["workspace"])
+
+                # check for a valid return
+                if len(query) == 0:
+                    error_data["error"] = "Workspace " + data["workspace"] + " does not exist."
+                    return HttpError(error_data)
+
+                # check that user is in this workspace
+                if not user.name in query[0]['memberUid']:
+                    error_data["error"] = "User " + user.name + " does not belong to the group workspace " + data["workspace"]+"."
+                    return HttpError(error_data)
+
 
             # check original path is in the request
             if not "original_path" in data:
@@ -708,7 +721,7 @@ class MigrationView(View):
                 mig = Migration.objects.get(**keyargs)
             except:
                 # return error as easily interpreted JSON
-                error_data = {"error"  : "Migration not found.",
+                error_data = {"error"  : "Batch not found.",
                               "migration_id" : keyargs["pk"],
                               "name"   : keyargs["user__name"]}
                 if workspace:
@@ -749,7 +762,7 @@ class MigrationView(View):
                 migs = Migration.objects.filter(**keyargs)
             except:
                 # return error as easily interpreted JSON
-                error_data = {"error"  : "Migrations not found.",
+                error_data = {"error"  : "Batches not found.",
                               "name"   : keyargs["user__name"]}
                 if workspace:
                     error_data["workspace"] = workspace
@@ -788,7 +801,7 @@ class MigrationView(View):
 
         # if the user name isn't in the request then reject
         if not "migration_id" in request.GET:
-            return HttpError({"error" : "No migration id supplied."})
+            return HttpError({"error" : "No batch id supplied."})
 
         # read the data
         data = request.read()
@@ -814,14 +827,14 @@ class MigrationView(View):
         try:
             migration = Migration.objects.get(pk=mig_id)
         except:
-            error_data = {"error": "Migration not found.",
+            error_data = {"error": "Batch not found.",
                           "migration_id": mig_id,
                           "name": username}
             return HttpError(error_data)
 
         # check that the migration request belongs to this user
         if username != migration.user.name:
-            error_data = {"error": "User cannot edit this migration as they do not own it!",
+            error_data = {"error": "User " + username + " cannot edit this batch as they do not own it!",
                           "request_id": mig_id,
                           "name": username}
             return HttpError(error_data)
