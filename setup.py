@@ -12,14 +12,17 @@ setup(
     version='0.1',
     packages=['jdma_control'],
     install_requires=[
+        'appdirs',
         'django',
         'django-sizefield',
         'django-extensions',
         'django-multiselectfield',
-        'django-taggit',
         'psycopg2',
+        'packaging',
+        'pyparsing',
         'pytz',
-        'six'
+        'six',
+        'jasmin-ldap',
     ],
     include_package_data=True,
     license='my License',  # example license
