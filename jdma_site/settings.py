@@ -105,8 +105,8 @@ STATIC_ROOT = '/var/www/static'
 # Email
 # Email
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-SERVER_EMAIL = DEFAULT_FROM_EMAIL = 'xfc@xfc.ceda.ac.uk'
-
+SERVER_EMAIL = 'jdma@jdma.ceda.ac.uk'
+DEFAULT_FROM_EMAIL = 'jdma@jdma.ceda.ac.uk'
 
 
 # Put your custom settings here.
