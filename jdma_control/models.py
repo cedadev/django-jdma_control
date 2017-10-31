@@ -79,6 +79,8 @@ class Migration(models.Model):
                      (VERIFYING, 'VERIFYING'),
                      (ON_TAPE, 'ON_TAPE'),
                      (FAILED, 'FAILED'))
+    STAGE_LIST = ['ON_DISK', 'PUT_PENDING', 'PUTTING', 'VERIFY_PENDING',
+                  'VERIFY_GETTING', 'VERIFYING', 'ON_TAPE', 'FAILED']
     stage = models.IntegerField(choices=STAGE_CHOICES, default=FAILED)
 
     # CHOICES for the permissions for batches
@@ -89,6 +91,7 @@ class Migration(models.Model):
     PERMISSION_CHOICES = ((PERMISSION_PRIVATE, 'PRIVATE'),
                           (PERMISSION_GROUP, 'GROUP'),
                           (PERMISSION_ALL, 'ALL'))
+    PERMISSION_LIST = ['PRIVATE', 'GROUP', 'ALL']
     permission = models.IntegerField(choices=PERMISSION_CHOICES, default=PERMISSION_PRIVATE)
 
     # batch id for elastic tape
@@ -154,6 +157,7 @@ class MigrationRequest(models.Model):
                          (GETTING, 'GETTING'),
                          (ON_DISK, 'ON_DISK'),
                          (FAILED, 'FAILED'))
+    REQ_STAGE_LIST = ['ON_TAPE', 'GET_PENDING', 'GETTING', 'ON_DISK', 'FAILED']
 
     stage = models.IntegerField(choices=REQ_STAGE_CHOICES, default=ON_TAPE)
 
