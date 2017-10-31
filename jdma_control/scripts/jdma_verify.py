@@ -11,10 +11,57 @@ import os
 import subprocess
 import logging
 import hashlib
+from datetime import datetime
+import calendar
+
+from django.core.mail import send_mail
 
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 from jdma_control.scripts.jdma_lock import setup_logging
+
+def get_permissions_string(p):
+    # this is unix permissions
+    is_dir = 'd'
+    dic = {'7':'rwx', '6' :'rw-', '5' : 'r-x', '4':'r--', '0': '---'}
+    perm = oct(p)[-3:]
+    return is_dir + ''.join(dic.get(x,x) for x in perm)
+
+
+def send_put_notification_email(put_req):
+    """Send an email to the user to notify them that their batch upload has been completed
+     var jdma_control.models.User user: user to send notification email to
+    """
+    user = put_req.user
+
+    if not user.notify:
+        return
+
+    # to address is notify_on_first
+    toaddrs = [user.email]
+    # from address is just a dummy address
+    fromaddr = "support@ceda.ac.uk"
+
+    # subject
+    subject = "[JDMA] - Notification of batch upload to Elastic Tape"
+    date = datetime.utcnow()
+    date_string = "% 2i %s %d %02d:%02d" % (date.day, calendar.month_abbr[date.month], date.year, date.hour, date.minute)
+
+    msg = "PUT request has succesfully completed uploading to Elastic Tape:\n"
+    msg+= "    Request id\t\t: " + str(put_req.pk)+"\n"
+    msg+= "    Batch id\t\t: " + str(put_reg.migration.pk)+"\n"
+    msg+= "    Workspace\t\t: " + put_req.migration.workspace+"\n"
+    msg+= "    Label\t\t\t: " + put_req.migration.label+"\n"
+    msg+= "    Date\t\t\t: " + put_req.migration.registered_date.isoformat()[0:16].replace("T"," ")+"\n"
+    msg+= "    Stage\t\t\t: " + Migration.STAGE_LIST[put_req.migration.stage]+"\n"
+    msg+= "    Permission\t\t: " + Migration.PERMISSION_LIST[put_req.migration.permission]+"\n"
+    msg+= "    Original path\t: " + put_req.migration.original_path+"\n"
+    msg+= "    Unix uid\t\t: " + put_req.migration.unix_user_id+"\n"
+    msg+= "    Unix gid\t\t: " + put_req.migration.unix_group_id+"\n"
+    msg+= "    Unix filep\t\t: " + get_permissions_string(put_req.migration.unix_permission)+"\n"
+    msg+= "    ET batch id\t\t: " + str(put_req.migration.et_id) + "\n"
+
+    send_mail(subject, msg, fromaddr, toaddrs, fail_silently=False)
 
 
 def calculate_digest(filename):
@@ -96,6 +143,7 @@ def verify_files():
             # if we reach this part without exiting then the batch has verified successfully and we
             # can transition to ON_TAPE, ready for the tidy up process
             pr.migration.stage = Migration.ON_TAPE
+            send_put_notification_email(pr)
             pr.migration.save()
             logging.info("Transition: batch ID: {} VERIFYING->ON_TAPE".format(pr.migration.et_id))
 
