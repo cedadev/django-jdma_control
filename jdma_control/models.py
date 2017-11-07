@@ -1,7 +1,6 @@
 from __future__ import unicode_literals
 
 from django.db import models
-from taggit.managers import TaggableManager
 from django.utils.encoding import python_2_unicode_compatible
 
 
@@ -95,8 +94,8 @@ class Migration(models.Model):
     permission = models.IntegerField(choices=PERMISSION_CHOICES, default=PERMISSION_PRIVATE)
 
     # batch id for elastic tape
-    et_id = models.IntegerField(blank=True,null=True,
-                                help_text="Elastic tape batch id")
+    external_id = models.IntegerField(blank=True,null=True,
+                                      help_text="Batch id for external backup system, e.g. elastic tape or object store")
 
     # label - defaults to path of the directory - relative to the GWS
     label = models.CharField(blank=True, null=True, max_length=2024,
@@ -105,9 +104,6 @@ class Migration(models.Model):
     # date - the date that the directory was registered with the JDMA
     registered_date = models.DateTimeField(blank=True, null=True,
                                            help_text="Date the request was registered with the JDMA")
-
-    # tags - using django-taggit pypi package
-    tags = TaggableManager(blank=True)
 
     # original directory - for restoring straight back
     original_path = models.CharField(max_length=2024, unique=True,
@@ -182,3 +178,18 @@ class MigrationRequest(models.Model):
 
     def __str__(self):
         return "{:>4} : {:16}".format(self.pk, self.request_type)
+
+
+@python_2_unicode_compatible
+class MigrationFile(models.Model):
+    """A record of a file in a migration in the JASMIN data migration app (JDMA)."""
+    # path to the file
+    path = models.CharField(max_length=2024, help_text="Absolute path to the file")
+    # foreign key to Migration
+    migration = models.ForeignKey(Migration, null=True,
+                                  help_text="Migration associated with this MigrationFile")
+    # SHA-256 digest
+    digest = models.CharField(max_length=64, help_text="SHA-256 digest of the file")
+
+    def __str__(self):
+        return self.path

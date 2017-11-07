@@ -16,6 +16,8 @@ import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 from jdma_control.scripts.jdma_lock import setup_logging
 
+import jdma_control.backends
+
 def remove_verification_files():
     """Remove those temporary files that have been created in the verification step"""
     # these occur during a PUT request
@@ -24,39 +26,15 @@ def remove_verification_files():
         # only do it if the files are on tape
         if pr.migration.stage == Migration.ON_TAPE:
             # get the directory that the temporary files are in
-            batch_id = pr.migration.et_id
+            batch_id = pr.migration.external_id
             # get the temporary directory
-            verify_dir = os.path.join(settings.VERIFY_DIR, "batch{}".format(batch_id))
+            verify_dir = os.path.join(settings.JDMA_BACKEND_OBJECT.VERIFY_DIR, "batch{}".format(batch_id))
             # remove the directory
             if os.path.isdir(verify_dir):
                 shutil.rmtree(verify_dir)
                 logging.info("TIDY: deleting directory " + verify_dir)
             else:
                 logging.error("TIDY: cannot find directory " + verify_dir)
-
-
-def remove_file_list_digest():
-    """Remove the file list and digest that were created in the PUT request"""
-    # these occur during a PUT request
-    put_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.PUT)
-    for pr in put_reqs:
-        # only do it if the files are on tape
-        if pr.migration.stage == Migration.ON_TAPE:
-            # get the file list and digest
-            file_list_path = os.path.join(settings.FILE_LIST_PATH, "et_file_list_"+str(pr.pk) + ".txt")
-            file_digest_path = os.path.join(settings.FILE_LIST_PATH, "et_file_digest_"+str(pr.pk) + ".txt")
-            # delete if exist
-            if os.path.exists(file_list_path):
-                os.remove(file_list_path)
-                logging.info("TIDY: deleting file " + file_list_path)
-            else:
-                logging.error("TIDY: cannot delete file " + file_list_path)
-
-            if os.path.exists(file_digest_path):
-                os.remove(file_digest_path)
-                logging.info("TIDY: deleting file " + file_digest_path)
-            else:
-                logging.error("TIDY: cannot delete file " + file_digest_path)
 
 
 def remove_original_files():
@@ -98,7 +76,6 @@ def run():
     # these are individual loops to aid debugging and so we can turn them
     # on / off if we wish
     remove_verification_files()
-    remove_file_list_digest()
     remove_original_files()
     remove_put_requests()
     remove_get_requests()

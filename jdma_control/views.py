@@ -8,6 +8,7 @@ from jasmin_ldap.core import *
 from jasmin_ldap.query import *
 
 import jdma_site.settings as settings
+import jdma_control.backends
 
 class UserView(View):
     """:rest-api
@@ -324,7 +325,7 @@ class MigrationRequestView(View):
                :>jsonarr string workspace: group workspace name - should be the same as the GWS
                :>jsonarr string label: human readable label of the request
                :>jsonarr string original_path: path of the original directory
-               :>jsonarr integer et_id: the elastic tape batch id
+               :>jsonarr integer external_id: the elastic tape batch id
 
                :statuscode 200: request completed successfully.
 
@@ -544,7 +545,7 @@ class MigrationRequestView(View):
             #   6. check if this is a duplicate
             dup_req = MigrationRequest.objects.filter(migration=mig, target_path=target_path)
             if len(dup_req) != 0:
-                error_data["error"] = "Duplicate GET request made: Batch ID: {}, Target path: {}".format(mig.et_id, target_path)
+                error_data["error"] = "Duplicate GET request made: Batch ID: {}, Target path: {}".format(mig.external_id, target_path)
                 return HttpError(error_data, status=403)
 
             #   7. check the target path exists
@@ -554,13 +555,13 @@ class MigrationRequestView(View):
                 return HttpError(error_data, status=403)
 
             #   8. check the user has permission to write to the directory
-            if not UserHasWritePermission(base_path, data["name"]):
+            if not user_has_write_permission(base_path, data["name"]):
                 error_data["error"] = "User " + data["name"] + " does not have write permission to the directory: " + str(target_path)
                 return HttpError(error_data, status=403)
 
             #   9. Check there is enough space on disk
             retrieval_size = 0
-            if not UserHasSufficientDiskSpace(base_path, data["name"], retrieval_size): # implement this function
+            if not user_has_sufficient_diskspace(base_path, data["name"], retrieval_size): # implement this function
                 error_data["error"] = "Insufficient diskspace for the retrieval (GET) " + str(target_path)
                 return HttpError(error_data, status=403)
 
@@ -572,7 +573,7 @@ class MigrationRequestView(View):
             # build the return data
             return_data = data
             return_data["request_id"] = migration_request.pk
-            return_data["batch_id"] = migration_request.migration.et_id
+            return_data["batch_id"] = migration_request.migration.external_id
             return_data["request_type"] = migration_request.request_type
             return_data["workspace"] = migration_request.migration.workspace
             return_data["stage"] =  migration_request.migration.stage
@@ -633,13 +634,13 @@ class MigrationRequestView(View):
                 return HttpError(error_data)
 
             # 2. check that the user has write permissions
-            if not UserHasWritePermission(original_path, data["name"]):
+            if not user_has_write_permission(original_path, data["name"]):
                 error_data["error"] = "User does not have write permission to the directory " + original_path
                 return HttpError(error_data, status=403)
 
             # 3. check et_quota ** TO DO ** implement this function!
-            if not UserHasETQuota(original_path, data["name"], data["workspace"]):
-                error_data["error"] = "Insufficient remaining Elastic Tape quota."
+            if not settings.JDMA_BACKEND_OBJECT.user_has_remaining_quota(original_path, data["name"], data["workspace"]):
+                error_data["error"] = "Insufficient remaining quota for " + settings.JDMA_BACKEND_OBJECT.get_name()
                 return HttpError(error_data, status=403)
 
             # All the checks have passed, so we can now add the request to the JDMA database
@@ -660,11 +661,24 @@ class MigrationRequestView(View):
             # get the permissions etc. of the original file
             fstat = os.stat(original_path)
 
-            # get the unix user id owner of the file
-            migration.unix_user_id = pwd.getpwuid(fstat.st_uid).pw_name
+            # get the unix user id owner of the file - use LDAP now
+            ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY, settings.JDMA_LDAP_REPLICAS)
+            with Connection.create(ldap_servers) as conn:
+                # query to find username with uidNumber matching fstat.st_uid
+                query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_USER).filter(uidNumber=fstat.st_uid)
+                if len(query[0]) == 0:
+                    logging.error("uidNumber: {} not found from LDAP".format(fstat.st_uid))
+                    migration.unix_user_id = ""
+                else:
+                    migration.unix_user_id = query[0]["uid"][0]
 
-            # get the unix group id owner of the file
-            migration.unix_group_id = grp.getgrgid(fstat.st_gid).gr_name
+                # query to find group with gidNumber matching fstat.gid
+                query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_GROUP).filter(gidNumber=fstat.st_gid)
+                if len(query[0]) == 0:
+                    logging.error("gidNumber: {} not found from LDAP".format(fstat.st_gid))
+                    migration.unix_group_id = ""
+                else:
+                    migration.unix_group_id = query[0]["cn"][0]
 
             # get the unix permissions
             migration.unix_permission = (fstat.st_mode & 0o777)
@@ -735,8 +749,8 @@ class MigrationView(View):
                     "stage": mig.stage,
                     "permission": mig.permission}
             # add the optional data if it's there
-            if mig.et_id:
-                data["et_id"] = mig.et_id
+            if mig.external_id:
+                data["external_id"] = mig.external_id
             if mig.registered_date:
                 data["registered_date"] = mig.registered_date.isoformat()
             #if mig.tags:

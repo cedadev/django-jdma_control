@@ -11,16 +11,16 @@ admin.site.register(User, UserAdmin)
 
 class MigrationAdmin(admin.ModelAdmin):
     save_on_top = True
-    list_display  = ('pk','label', 'user', 'stage', 'workspace','et_id', 'registered_date', 'permission')
+    list_display  = ('pk','label', 'user', 'stage', 'workspace','external_id', 'registered_date', 'permission')
     list_filter   = ('stage','registered_date',)
 
-    fields        = ('user','label','workspace','stage','et_id', 'tags',
+    fields        = ('user','label','workspace','stage','external_id',
                     'registered_date','permission',
                     'unix_user_id','unix_group_id','unix_permission',
                     'original_path', 'failure_reason')
     readonly_fields = ('failure_reason',)
 
-    search_fields = ('user','label','workspace','stage','et_id')
+    search_fields = ('user','label','workspace','stage','external_id')
 admin.site.register(Migration, MigrationAdmin)
 
 class MigrationRequestAdmin(admin.ModelAdmin):
@@ -31,3 +31,11 @@ class MigrationRequestAdmin(admin.ModelAdmin):
     fields = ('user', 'request_type', 'stage', 'date', 'migration', 'target_path')
     search_fields = ('request_type',)
 admin.site.register(MigrationRequest, MigrationRequestAdmin)
+
+class MigrationFileAdmin(admin.ModelAdmin):
+    save_on_top = True
+    list_display = ('pk', 'path', 'digest', 'migration')
+    list_filter = ('migration',)
+    fields = ('path', 'digest', 'migration')
+    search_fields = ('path',)
+admin.site.register(MigrationFile, MigrationFileAdmin)
