@@ -3,11 +3,15 @@
 
 import os
 
+
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
 DEBUG = True
 TESTING = True
+
+
 
 # Read the secret key from a file
 SECRET_KEY_FILE = '/home/vagrant/JDMA/conf/secret_key.txt'
@@ -28,7 +32,6 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
         'django_extensions',
         'jdma_control',
-        'taggit',
     ]
 
 MIDDLEWARE = [
@@ -105,8 +108,7 @@ STATIC_ROOT = '/var/www/static'
 # Email
 # Email
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-SERVER_EMAIL = 'jdma@jdma.ceda.ac.uk'
-DEFAULT_FROM_EMAIL = 'jdma@jdma.ceda.ac.uk'
+SERVER_EMAIL = DEFAULT_FROM_EMAIL = 'jdma@jdma.ceda.ac.uk'
 
 
 # Put your custom settings here.
@@ -121,14 +123,6 @@ JDMA_LDAP_PRIMARY = "ldap://homer.esc.rl.ac.uk"
 JDMA_LDAP_REPLICAS = ["ldap://marge.esc.rl.ac.uk", "ldap://wiggum.jc.rl.ac.uk"]
 
 LOG_PATH = "/var/log/jdma"
-FILE_LIST_PATH = "/jdma_file_lists/"
 
-if TESTING:
-    ET_RSS_FILE = "/jdma_rss_feed/test_feed.xml"
-    # directory for FAKE_ET
-    FAKE_ET_DIR = "/home/vagrant/fake_et"
-    # directory to pull data back for verification
-    VERIFY_DIR = "/home/vagrant/verify_dir"
-else:
-    # RSS feeds - URL for production, FILE for TESTING version
-    ET_RSS_URL = "http://et-monitor.fds.rl.ac.uk/et_rss/ET_RSS_AlertWatch_atom.php"
+# set the backend
+JDMA_BACKEND = "FakeTapeBackend"
