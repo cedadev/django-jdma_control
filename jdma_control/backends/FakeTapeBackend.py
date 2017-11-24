@@ -106,6 +106,7 @@ class FakeTapeBackend(Backend):
         """Determine which batches have completed."""
         # generate the RSS feed
         gen_test_feed()
+        # interpret the RSS feed
         completed_PUTs, completed_GETs = monitor_et_rss_feed(settings.JDMA_BACKEND_OBJECT.ET_RSS_FILE)
         return completed_PUTs, completed_GETs
 

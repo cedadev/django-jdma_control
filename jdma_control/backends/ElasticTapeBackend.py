@@ -6,6 +6,10 @@ import feedparser
 import os
 import re
 
+# Import elastic_tape client library after logging is set up
+import elastic_tape.client
+from elastic_tape.shared.error import StorageDError
+
 # statuses for the RSS items
 PUT_COMPLETE = 0
 GET_COMPLETE = 1
@@ -91,7 +95,8 @@ class ElasticTapeBackend(Backend):
 
     def monitor(self):
         """Determine which batches have completed."""
-        pass
+        completed_PUTs, completed_GETs = monitor_et_rss_feed(settings.JDMA_BACKEND_OBJECT.ET_RSS_FILE)
+        return completed_PUTs, completed_GETs
 
     def get(self, batch_id, target_dir):
         """Download a batch of files from the Elastic Tape to a target directory."""

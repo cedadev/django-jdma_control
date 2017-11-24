@@ -70,10 +70,10 @@ class UserView(View):
                     user = User.objects.get(name=username)
                 else:
                     error_data["error"] = "Error with name parameter."
-                    return HttpError(data)
+                    return HttpError(error_data)
             except:
                 error_data["error"] = "User not found."
-                return HttpError(data)
+                return HttpError(error_data)
 
         data = {"name" : user.name,
                 "email" : user.email,
@@ -266,6 +266,9 @@ class UserView(View):
         else:
             # get the username
             username = request.GET.get("name", "")
+            # update the user using the json
+            data = request.read()
+            data = json.loads(data)
             # copy the data into error_data
             error_data = data
             try:
@@ -277,9 +280,7 @@ class UserView(View):
             except:
                 error_data["error"] = "User not found."
                 return HttpError(error_data)
-            # update the user using the json
-            data = request.read()
-            data = json.loads(data)
+
             if "email" in data:
                 email = data["email"]
                 if email == "":
@@ -455,7 +456,7 @@ class MigrationRequestView(View):
             user = User.objects.get(name=data["name"])
         except:
             error_data["error"] = "User not found."
-            return HttpError(data)
+            return HttpError(error_data)
 
         # check request type is in request
         if not "request_type" in data:
