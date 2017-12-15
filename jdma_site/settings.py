@@ -111,6 +111,7 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 SERVER_EMAIL = DEFAULT_FROM_EMAIL = 'jdma@jdma.ceda.ac.uk'
 
 
+
 # Put your custom settings here.
 ALLOWED_HOSTS=["192.168.51.26",
                "192.168.51.26"]
@@ -124,5 +125,4 @@ JDMA_LDAP_REPLICAS = ["ldap://marge.esc.rl.ac.uk", "ldap://wiggum.jc.rl.ac.uk"]
 
 LOG_PATH = "/var/log/jdma"
 
-# set the backend
-JDMA_BACKEND = "FakeTapeBackend"
+JDMA_BACKEND = "ElasticTapeBackend"

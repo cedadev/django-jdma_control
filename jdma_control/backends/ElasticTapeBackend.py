@@ -5,10 +5,19 @@ from datetime import datetime
 import feedparser
 import os
 import re
+import requests
+import subprocess
+from xml.dom.minidom import parseString
 
 # Import elastic_tape client library after logging is set up
 import elastic_tape.client
 from elastic_tape.shared.error import StorageDError
+import jdma_site.settings as settings
+from jdma_control.backends import ElasticTapeSettings as ET_Settings
+
+# LDAP imports
+from jasmin_ldap.core import *
+from jasmin_ldap.query import *
 
 # statuses for the RSS items
 PUT_COMPLETE = 0
@@ -81,11 +90,14 @@ def monitor_et_rss_feed(feed):
     # need to do this backwards to get the mappings between the retrieval id and
     # batch id before the check for GET_COMPLETE is done
     for item in et_rss['items'][::-1]:
-        rss_i = interpret_rss_status(item['description'])
-        if rss_i.status == GET_COMPLETE:
-            completed_GETs.append(rss_i)
-        elif rss_i.status == PUT_COMPLETE:
-            completed_PUTs.append(rss_i)
+        print (item)
+        if 'description' in item:
+            rss_i = interpret_rss_status(item['description'])
+            print(rss_i.status, rss_i.id, rss_i.date)
+            if rss_i.status == GET_COMPLETE:
+                completed_GETs.append(rss_i)
+            elif rss_i.status == PUT_COMPLETE:
+                completed_PUTs.append(rss_i)
     return completed_PUTs, completed_GETs
 
 
@@ -93,17 +105,97 @@ class ElasticTapeBackend(Backend):
     """Class for a JASMIN Data Migration App backend which targets Elastic Tape.
        Inherits from Backend class and overloads inherited functions."""
 
+    def __init__(self):
+        """Need to set the verification directory and logging"""
+        self.VERIFY_DIR = ET_Settings.VERIFY_DIR
+        self.setup_logging(self.__class__)
+
     def monitor(self):
         """Determine which batches have completed."""
-        completed_PUTs, completed_GETs = monitor_et_rss_feed(settings.JDMA_BACKEND_OBJECT.ET_RSS_FILE)
+        completed_PUTs, completed_GETs = monitor_et_rss_feed(ET_Settings.ET_RSS_FILE)
         return completed_PUTs, completed_GETs
 
-    def get(self, batch_id, target_dir):
+    def get(self, batch_id, user, workspace, target_dir):
         """Download a batch of files from the Elastic Tape to a target directory."""
         pass
 
-    def put(self, filelist):
-        """Put a list of files onto the Elastic Tape - return the (randomly generated) external storage batch id"""
+    def put(self, filelist, user, workspace):
+        """Put a list of files onto the Elastic Tape - return the external storage batch id"""
+        # create connection to Elastic tape
+        conn = elastic_tape.client.connect(ET_Settings.PUT_HOST, ET_Settings.PORT)
+        # create a new batch for the user in the workspace
+        batch = conn.newBatch(workspace, user)
+        logging.info("Starting new batch for user: " + user)
+        # do not allow overwriting of files or symbolic links
+        batch.override = 0
+        # override the requester to allow the JDMA server to handle the requests
+        batch.requester = user
+        # add each file in the filelist to the batch
+        # each entry is a file, not a directory, as the os.walk of the directory returns just the files
+        for fp in filelist:
+            # extra check
+            if not os.path.exists(fp):
+                logging.debug("File not found: " + fp)
+            else:
+                # add the file
+                batch.addFile(fp)
+        # register the batch and get the id
+        logging.info("Finished adding files, sending batch to ET server: "+ ET_Settings.PUT_HOST)
+        print(batch.requester)
+        batch_id = batch.register()
+
+        logging.info("Batch with id: " + str(batch_id) + " created successfully")
+        return int(batch_id)
+
+    def user_has_put_permission(self, username, workspace):
+        return Backend.user_has_put_permission(self, username, workspace)
+
+    def user_has_get_permission(self, migration, username, workspace):
+        return Backend.user_has_get_permission(self, migration, username, workspace)
+
+    def user_has_put_quota(self, original_path, user, workspace):
+        """Get the remaining quota for the user in the workspace"""
+        # This requires interpreting a webpage at http://et-monitor.fds.rl.ac.uk/et_user/ET_Holdings_Summary_XML.php
+        # build the url to the table
+        quota_url = ET_Settings.ET_QUOTA_URL + "?workspace="+workspace+"&caller=etjasmin"
+        quota_xml = requests.get(quota_url)
+        if quota_xml.status_code != 200:
+            raise Exception("Could not read quota URL: " + quota_url)
+        # try parsing the XML into a XML dom
+        try:
+            # get the quota amount and the quota used
+            quota_dom = parseString(quota_xml.content)
+            quota = int(quota_dom.getElementsByTagName("quota")[0].firstChild.data)
+            quota_used = int(quota_dom.getElementsByTagName("quota_used")[0].firstChild.data)
+            quota_dom.unlink()
+            # calculate remaining quota
+            quota_remaining = quota - quota_used
+        except:
+            raise Exception("Could not parse XML document at: " + quota_url)
+
+        # now get the size of the original_path directory
+        # if pan_du exists then use it, otherwise use du
+        if os.path.exists(ET_Settings.PAN_DU_EXE):
+            # execute and interpret the PAN_DU_EXE command
+            try:
+                pan_du_output = subprocess.check_output([ET_Settings.PAN_DU_EXE, "-s", original_path])
+                # get the path_size in bytes from the number in pos 4 and the multiplier in pos 5
+                path_split = pan_du_output.split()
+                path_size = int(path_split[4]) * get_size_multiplier(path_split[5])
+            except:
+                raise Exception("Error with pan_du command")
+
+        else:
+            # just run the normal du command
+            try:
+                du_output = subprocess.check_output(["/usr/bin/du", "-s", original_path])
+                # get the path size from the first element of the split string
+                path_size = int(du_output.split()[0])
+            except:
+                raise Exception("Error with du command")
+
+        return quota_remaining > path_size
+
 
     def get_name(self):
         return "Elastic Tape"

@@ -4,7 +4,7 @@
 
    Running this will change the state of the migrations:
      PUTTING->VERIFY_PENDING
-     VERIFYING->ON_TAPE
+     VERIFYING->ON_STORAGE
      GETTING->ON_DISK
 """
 
@@ -148,7 +148,7 @@ def monitor_verify(completed_GETs):
             # This is fine (in contrast) to above monitor_get as
             # 1. There is only one GET for each external_id in the VERIFY stage
             # 2. GETs (for none-VERIFY stage, i.e. to actaully download the data)
-            # cannot be issued until the Migration.status is ON_TAPE
+            # cannot be issued until the Migration.status is ON_STORAGE
             if vr.migration.external_id in completed_GETs:
                 vr.migration.stage = Migration.VERIFYING
                 vr.migration.save()

@@ -4,9 +4,6 @@ from jdma_control.views_functions import *
 from datetime import datetime
 import subprocess
 
-from jasmin_ldap.core import *
-from jasmin_ldap.query import *
-
 import jdma_site.settings as settings
 import jdma_control.backends
 
@@ -72,8 +69,8 @@ class UserView(View):
                     error_data["error"] = "Error with name parameter."
                     return HttpError(error_data)
             except:
-                error_data["error"] = "User not found."
-                return HttpError(error_data)
+                error_data["error"] = "User " + username + " not initialised yet.  Run jdma.py init first."
+                return HttpError(error_data, status=403)
 
         data = {"name" : user.name,
                 "email" : user.email,
@@ -278,8 +275,8 @@ class UserView(View):
                     error_data["error"] = "Error with name parameter."
                     return HttpError(error_data)
             except:
-                error_data["error"] = "User not found."
-                return HttpError(error_data)
+                error_data["error"] = "User " + username + " not initialised yet.  Run jdma.py init first."
+                return HttpError(error_data, status=403)
 
             if "email" in data:
                 email = data["email"]
@@ -455,8 +452,8 @@ class MigrationRequestView(View):
         try:
             user = User.objects.get(name=data["name"])
         except:
-            error_data["error"] = "User not found."
-            return HttpError(error_data)
+            error_data["error"] = "User " + data["name"] + " not initialised yet.  Run jdma.py init first."
+            return HttpError(error_data, status=403)
 
         # check request type is in request
         if not "request_type" in data:
@@ -479,16 +476,14 @@ class MigrationRequestView(View):
         # set the date
         migration_request.date = cdate
 
-        # create the LDAP server pool needed in both GET and PUT requests
-        ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY, settings.JDMA_LDAP_REPLICAS)
-
+        # Note: 08/12/2017: permissions are now handled by the Backend
         # now choose what to do based on the request
         if data["request_type"] == "GET":
             # checks
             #   1. Check that the request id is supplied
             #   2. Check that the request exists
             #   3. Check that the request belongs to the user, or has group or universal permission
-            #   4. Check that the stage is ON_TAPE
+            #   4. Check that the stage is ON_STORAGE
             #   5. Check the user has permission to write to the target directory (or original path if not set)
             #   6. Check whether this is a duplicate
             #   7. Check that the target path exists
@@ -508,29 +503,14 @@ class MigrationRequestView(View):
                 return HttpError(error_data)
 
             #   3. check that the migration belongs to the user, or has group or universal permission
-            if mig.permission == Migration.PERMISSION_PRIVATE:
-                if mig.user.name != user.name:
-                    error_data["error"] = "User " + user.name + " does not have permission to request the batch."
-                    return HttpError(error_data)
+            if not settings.JDMA_BACKEND_OBJECT.user_has_get_permission(mig, user.name, mig.workspace):
+                error_data["error"] = "User " + user.name + " does not have permission to request the batch."
+                return HttpError(error_data)
 
-            if mig.permission == Migration.PERMISSION_GROUP:
-                # check that the user is in a group that matches the workspace
-                # get the users in the workspace group
-                with Connection.create(ldap_servers) as conn:
-                    query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_GROUP).filter(cn=mig.workspace)
-
-                    # check for a valid return
-                    if len(query) == 0:
-                        logging.error("Group workspace: {} not found from LDAP".format(mig.workspace))
-
-                    if len(query) == 0 or not user.name in query[0]['memberUid']:
-                        error_data["error"] = "User " + user.name + " does not have permission to request the batch."
-                        return HttpError(error_data)
-
-            #   4. check that the stage is ON_TAPE
-            if mig.stage != Migration.ON_TAPE:
+            #   4. check that the stage is ON_STORAGE
+            if mig.stage != Migration.ON_STORAGE:
                 mig_stage = Migration.STAGE_CHOICES[mig.stage][1]
-                error_data["error"] = "Batch stage is: " + mig_stage + ".  Cannot retrieve (GET) until stage is ON_TAPE."
+                error_data["error"] = "Batch stage is: " + mig_stage + ".  Cannot retrieve (GET) until stage is ON_STORAGE."
                 return HttpError(error_data)
 
             # We don't need to create a migration as we're operating on an existing one - assign it
@@ -552,7 +532,7 @@ class MigrationRequestView(View):
             #   7. check the target path exists
             base_path = os.path.dirname(target_path)
             if not os.path.exists(base_path):
-                error_data["error"] = "Parent of target path does not exist: " + str(base_path)
+                error_data["error"] = "Parent of target path " + target_path + " does not exist: " + str(base_path)
                 return HttpError(error_data, status=403)
 
             #   8. check the user has permission to write to the directory
@@ -568,7 +548,7 @@ class MigrationRequestView(View):
 
             # All the checks have been passed so we can now add the request to the JDMA database
             migration_request.target_path = target_path
-            migration_request.stage = MigrationRequest.ON_TAPE
+            migration_request.stage = MigrationRequest.ON_STORAGE
 
             migration_request.save()
             # build the return data
@@ -588,21 +568,6 @@ class MigrationRequestView(View):
                 error_data["error"] = "No workspace supplied."
                 return HttpError(error_data)
 
-            # check workspace exists - get the group for the workspace from LDAP
-            with Connection.create(ldap_servers) as conn:
-                query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_GROUP).filter(cn=data["workspace"])
-
-                # check for a valid return
-                if len(query) == 0:
-                    error_data["error"] = "Workspace " + data["workspace"] + " does not exist."
-                    return HttpError(error_data)
-
-                # check that user is in this workspace
-                if not user.name in query[0]['memberUid']:
-                    error_data["error"] = "User " + user.name + " does not belong to the group workspace " + data["workspace"]+"."
-                    return HttpError(error_data)
-
-
             # check original path is in the request
             if not "original_path" in data:
                 error_data["error"] = "No directory path supplied."
@@ -615,7 +580,7 @@ class MigrationRequestView(View):
 
                 # check that there is not already an entry with this path
                 if Migration.objects.filter(original_path=original_path):
-                    error_data["error"] = "Directory is already in a migration."
+                    error_data["error"] = "Directory " + original_path + " is already in a migration."
                     return HttpError(error_data)
 
                 # check for the label in the request - if not then derive from directory name
@@ -627,11 +592,12 @@ class MigrationRequestView(View):
             # three checks:
             #   1. Check the path exists (obvs.)
             #   2. Check the user has write permission to the directory
-            #   3. Check the user has enough space in their ET quota
+            #   3. Check user has write permission in group workspace
+            #   4. Check the user has enough space in their ET quota
 
             # 1. check that the path exists
             if not os.path.isdir(original_path):
-                error_data["error"] = "Directory path does not exist."
+                error_data["error"] = "Directory path " + original_path + " does not exist."
                 return HttpError(error_data)
 
             # 2. check that the user has write permissions
@@ -639,8 +605,14 @@ class MigrationRequestView(View):
                 error_data["error"] = "User does not have write permission to the directory " + original_path
                 return HttpError(error_data, status=403)
 
-            # 3. check et_quota ** TO DO ** implement this function!
-            if not settings.JDMA_BACKEND_OBJECT.user_has_remaining_quota(original_path, data["name"], data["workspace"]):
+            # 3. check group workspace permission
+            if not settings.JDMA_BACKEND_OBJECT.user_has_put_permission(data["name"], data["workspace"]):
+                error_data["error"] = "User " + data["name"] + " does not have write permissions or the workspace " +\
+                                      data["workspace"] + " does not exist for " + settings.JDMA_BACKEND_OBJECT.get_name()
+                return HttpError(error_data, status=403)
+
+            # 4. check et_quota ** TO DO ** implement this function!
+            if not settings.JDMA_BACKEND_OBJECT.user_has_put_quota(original_path, data["name"], data["workspace"]):
                 error_data["error"] = "Insufficient remaining quota for " + settings.JDMA_BACKEND_OBJECT.get_name()
                 return HttpError(error_data, status=403)
 
@@ -665,19 +637,17 @@ class MigrationRequestView(View):
             # get the unix user id owner of the file - use LDAP now
             ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY, settings.JDMA_LDAP_REPLICAS)
             with Connection.create(ldap_servers) as conn:
-                # query to find username with uidNumber matching fstat.st_uid
+                # query to find username with uidNumber matching fstat.st_uid - default to user
                 query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_USER).filter(uidNumber=fstat.st_uid)
-                if len(query[0]) == 0:
-                    logging.error("uidNumber: {} not found from LDAP".format(fstat.st_uid))
-                    migration.unix_user_id = ""
+                if len(query) == 0 or len(query[0]) == 0:
+                    migration.unix_user_id = user.name
                 else:
                     migration.unix_user_id = query[0]["uid"][0]
 
-                # query to find group with gidNumber matching fstat.gid
+                # query to find group with gidNumber matching fstat.gid - default to users group
                 query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_GROUP).filter(gidNumber=fstat.st_gid)
-                if len(query[0]) == 0:
-                    logging.error("gidNumber: {} not found from LDAP".format(fstat.st_gid))
-                    migration.unix_group_id = ""
+                if len(query) == 0 or len(query[0]) == 0:
+                    migration.unix_group_id = "users"
                 else:
                     migration.unix_group_id = query[0]["cn"][0]
 
@@ -692,6 +662,8 @@ class MigrationRequestView(View):
 
             # associate the migration_request with the migration and save to the database
             migration_request.migration = migration
+            # set the migration request to be ON_DISK as that makes sense
+            migration_request.stage = MigrationRequest.ON_DISK
             migration_request.save()
 
             # build the return data

@@ -13,7 +13,7 @@ setup(
     packages=['jdma_control'],
     install_requires=[
         'appdirs',
-        'django',
+        'django==1.11.1',
         'django-sizefield',
         'django-extensions',
         'django-multiselectfield',
@@ -22,7 +22,10 @@ setup(
         'pyparsing',
         'pytz',
         'six',
+        'feedgen',
+        'feedparser',
         'jasmin-ldap',
+        'beautifulsoup4',
     ],
     include_package_data=True,
     license='my License',  # example license

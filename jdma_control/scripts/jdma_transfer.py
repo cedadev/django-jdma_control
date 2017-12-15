@@ -50,7 +50,9 @@ def put_transfers():
                     mig_file.save()
 
                 # Use the Backend stored in settings.JDMA_BACKEND_OBJECT to do the put
-                external_id = int(settings.JDMA_BACKEND_OBJECT.put(filepaths))
+                external_id = int(settings.JDMA_BACKEND_OBJECT.put(filepaths,
+                                                                   pr.migration.user.name,
+                                                                   pr.migration.workspace))
                 pr.migration.external_id = external_id
                 pr.migration.stage = Migration.PUTTING
                 pr.migration.save()
@@ -67,7 +69,10 @@ def put_transfers():
             if not os.path.isdir(target_dir):
                 os.makedirs(target_dir)
             # use Backend.get to pull back the files to a temporary directory
-            settings.JDMA_BACKEND_OBJECT.get(external_id, target_dir)
+            settings.JDMA_BACKEND_OBJECT.get(external_id,
+                                             pr.migration.user.name,
+                                             pr.migration.workspace,
+                                             target_dir)
             pr.migration.stage = Migration.VERIFY_GETTING
             pr.migration.save()
             logging.info("Transition: batch ID: {} VERIFY_PENDING->VERIFY_GETTING".format(pr.migration.external_id))
@@ -88,7 +93,8 @@ def get_transfers():
             if target_dir == gr.migration.original_path:
                 target_dir = "/"
             # use the backend to pull back the files to a temporary directory
-            settings.JDMA_BACKEND_OBJECT.get(external_id, target_dir)
+            settings.JDMA_BACKEND_OBJECT.get(external_id, target_dir,
+                                             gr.user, workspace)
             gr.stage = MigrationRequest.GETTING
             gr.save()
             logging.info("Transition: request ID: {} GET_PENDING->GETTING".format(gr.pk))

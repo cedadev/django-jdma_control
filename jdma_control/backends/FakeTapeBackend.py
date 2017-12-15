@@ -11,6 +11,8 @@ from shutil import copy, copy2
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 from jdma_control.backends.ElasticTapeBackend import monitor_et_rss_feed
+from jdma_control.backends import FakeTapeSettings as FS_Settings
+from jdma_control.backends import ElasticTapeSettings as ET_Settings
 
 def gen_test_feed():
     """Generate a test RSS(atom) feed."""
@@ -29,7 +31,7 @@ def gen_test_feed():
         if pr.migration.stage == Migration.PUTTING:
             # get the et id and directory from it
             batch_id = pr.migration.external_id
-            batch_dir = os.path.join(settings.JDMA_BACKEND_OBJECT.FAKE_ET_DIR, "batch%04i" % batch_id)
+            batch_dir = os.path.join(FS_Settings.FAKE_ET_DIR, "batch%04i" % batch_id)
             # check something has been written to the directory
             if len(os.listdir(batch_dir)) != 0:
                 # write the completed description into the RSS feed
@@ -92,29 +94,42 @@ def gen_test_feed():
             fe.description(ret_comp_desc)
             c_alert += 1
 
-    fg.rss_file(settings.JDMA_BACKEND_OBJECT.ET_RSS_FILE)
+    fg.rss_file(FS_Settings.ET_RSS_FILE)
+
+
+def get_size_multiplier(multi_string):
+    # get the multiplier from the string, e.g. MiB = 1024**2
+    multi_maps = {"KiB":1024, "MiB":1024**2, "GiB":1024**3, "TiB":1024**4, "PiB":1024**5, "EiB":1024**6, "ZiB":1024**7, "YiB":1024**8,
+                  "kB":1000,  "MB":1000**2,  "GB":1000**3,  "TB":1000**4,  "PB":1000**5,  "EB":1000**6,  "ZB":1000**7,  "YB":1000**8}
+    return multi_maps[multi_string]
 
 
 class FakeTapeBackend(Backend):
     """Class for a JASMIN Data Migration App backend which emulates Elastic Tape.
        Inherits from Backend class and overloads inherited functions."""
-    ET_RSS_FILE = "/jdma_rss_feed/test_feed.xml"
-    FAKE_ET_DIR = "/home/vagrant/fake_et"
-    VERIFY_DIR  = "/home/vagrant/verify_dir"
+
+    def __init__(self):
+        """Need to set the verification directory and logging"""
+        self.VERIFY_DIR = FS_Settings.VERIFY_DIR
+        self.setup_logging(self.__class__)
 
     def monitor(self):
         """Determine which batches have completed."""
         # generate the RSS feed
         gen_test_feed()
         # interpret the RSS feed
-        completed_PUTs, completed_GETs = monitor_et_rss_feed(settings.JDMA_BACKEND_OBJECT.ET_RSS_FILE)
+        completed_PUTs, completed_GETs = monitor_et_rss_feed(FS_Settings.ET_RSS_FILE)
+        for cp in completed_PUTs:
+            logging.info("Completed PUT: " + str(cp))
+        for cg in completed_GETs:
+            logging.info("Completed GET:" + str(cg))
         return completed_PUTs, completed_GETs
 
-    def get(self, batch_id, target_dir):
+    def get(self, batch_id, user, workspace, target_dir):
         """Download a batch of files from the FakeTape to a target directory."""
         # download a batch from the fake_et
         # get the directory which has the batch in it
-        batch_dir = os.path.join(FakeTapeBackend.FAKE_ET_DIR, "batch%04i" % batch_id)
+        batch_dir = os.path.join(FS_Settings.FAKE_ET_DIR, "batch%04i" % batch_id)
         # walk the directory and copy
         user_file_list = os.walk(batch_dir, followlinks=False)
         # copy full paths into a list
@@ -134,14 +149,15 @@ class FakeTapeBackend(Backend):
             if not os.path.isdir(target_path):
                 os.makedirs(target_path)
             copy(fp, target_fp)
+            logging.info("GET: " + fp + " to: " + target_fp)
 
 
-    def put(self, filelist):
+    def put(self, filelist, user, workspace):
         """Put a list of files into the FakeTape - return the (randomly generated) external storage batch id"""
         # create a batchid as a random number between 0 and 9999
         batch_id = random.uniform(0,9999)
         # create the directory to store the batch in
-        batch_dir = os.path.join(FakeTapeBackend.FAKE_ET_DIR, "batch%04i" % batch_id)
+        batch_dir = os.path.join(FS_Settings.FAKE_ET_DIR, "batch%04i" % batch_id)
         if not os.path.isdir(batch_dir):
             os.makedirs(batch_dir)
         # now copy the files
@@ -159,13 +175,18 @@ class FakeTapeBackend(Backend):
                 os.makedirs(dest_dir)
             # do the copy
             copy2(fname, dest_file)
+            logging.info("PUT: " + fname + " to: " + dest_file)
         return batch_id
 
     def get_name(self):
         return "Fake Tape."
 
-    def user_has_permission(self, user, workspace):
-        return True
+    def user_has_put_permission(self, username, workspace):
+        return Backend.user_has_put_permission(self, username, workspace)
 
-    def user_has_remaining_quota(self, filelist, user, workspace):
+    def user_has_get_permission(self, migration, username, workspace):
+        return Backend.user_has_get_permission(self, migration, username, workspace)
+
+    def user_has_put_quota(self, original_path, user, workspace):
+        """Get the remaining quota for the user in the workspace"""
         return True

@@ -24,7 +24,7 @@ def remove_verification_files():
     put_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.PUT)
     for pr in put_reqs:
         # only do it if the files are on tape
-        if pr.migration.stage == Migration.ON_TAPE:
+        if pr.migration.stage == Migration.ON_STORAGE:
             # get the directory that the temporary files are in
             batch_id = pr.migration.external_id
             # get the temporary directory
@@ -43,7 +43,7 @@ def remove_original_files():
     put_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.PUT)
     for pr in put_reqs:
         # only do it if the files are on tape
-        if pr.migration.stage == Migration.ON_TAPE:
+        if pr.migration.stage == Migration.ON_STORAGE:
             if os.path.isdir(pr.migration.original_path):
                 shutil.rmtree(pr.migration.original_path)
                 logging.info("TIDY: deleting directory " + pr.migration.original_path)
@@ -52,11 +52,11 @@ def remove_original_files():
 
 
 def remove_put_requests():
-    """Remove the put requests that are ON_TAPE"""
+    """Remove the put requests that are ON_STORAGE"""
     put_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.PUT)
     for pr in put_reqs:
         # only do it if the files are on tape
-        if pr.migration.stage == Migration.ON_TAPE:
+        if pr.migration.stage == Migration.ON_STORAGE:
             logging.info("TIDY: deleting PUT request {}".format(pr.pk))
             pr.delete()
 
@@ -66,7 +66,7 @@ def remove_get_requests():
     get_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.GET)
     for gr in get_reqs:
         # only do it if the files are on tape
-        if gr.migration.stage == Migration.ON_DISK:
+        if gr.stage == MigrationRequest.ON_DISK and gr.migration.stage == Migration.ON_STORAGE:
             logging.info("TIDY: deleting GET request {}".format(gr.pk))
             gr.delete()
 

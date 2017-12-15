@@ -16,13 +16,13 @@ In the test mode run the scripts in this order:
 3. jdma_monitor     PUTTING->VERIFY_PENDING
 4. jdma_transfer    VERIFY_PENDING->VERIFY_GETTING
 5. jdma_monitor     VERIFY_GETTING->VERIFYING
-6. jdma_verify      VERIFYING->ON_TAPE
+6. jdma_verify      VERIFYING->ON_STORAGE
 7. jdma_tidy        remove files, intermediary directories (verify) and the
                     original_path, delete MigrationRequest
 
 (To get data)
                     MigrationRequest.stage
-1. jdma_lock        ON_TAPE->GET_PENDING
+1. jdma_lock        ON_STORAGE->GET_PENDING
 2. jdma_transfer    GET_PENDING->GETTING
 3. jdma_monitor     GETTING->ON_DISK
 4. jdma_tidy        set permissions and owner back on downloaded directory,

@@ -50,7 +50,8 @@ class Migration(models.Model):
 
 
     # user that the directory belongs to
-    user = models.ForeignKey(User, help_text="User that the directory belongs to")
+    user = models.ForeignKey(User, on_delete=models.CASCADE,
+                             help_text="User that the directory belongs to")
 
     # workspace that the user wishes to use
     workspace = models.CharField(max_length=2024,
@@ -67,7 +68,7 @@ class Migration(models.Model):
     VERIFY_PENDING = 3
     VERIFY_GETTING = 4
     VERIFYING = 5
-    ON_TAPE = 6
+    ON_STORAGE = 6
     FAILED = 7
 
     STAGE_CHOICES = ((ON_DISK, 'ON_DISK'),
@@ -76,10 +77,10 @@ class Migration(models.Model):
                      (VERIFY_PENDING, 'VERIFY_PENDING'),
                      (VERIFY_GETTING, 'VERIFY_GETTING'),
                      (VERIFYING, 'VERIFYING'),
-                     (ON_TAPE, 'ON_TAPE'),
+                     (ON_STORAGE, 'ON_STORAGE'),
                      (FAILED, 'FAILED'))
     STAGE_LIST = ['ON_DISK', 'PUT_PENDING', 'PUTTING', 'VERIFY_PENDING',
-                  'VERIFY_GETTING', 'VERIFYING', 'ON_TAPE', 'FAILED']
+                  'VERIFY_GETTING', 'VERIFYING', 'ON_STORAGE', 'FAILED']
     stage = models.IntegerField(choices=STAGE_CHOICES, default=FAILED)
 
     # CHOICES for the permissions for batches
@@ -142,23 +143,24 @@ class MigrationRequest(models.Model):
                    "GET" : GET}
     request_type = models.IntegerField(choices=__REQUEST_CHOICES)
 
-    ON_TAPE = 0
+    ON_STORAGE = 0
     GET_PENDING = 1
     GETTING = 2
     ON_DISK = 3
     FAILED  = 4
 
-    REQ_STAGE_CHOICES = ((ON_TAPE, 'ON_TAPE'),
+    REQ_STAGE_CHOICES = ((ON_STORAGE, 'ON_STORAGE'),
                          (GET_PENDING, 'GET_PENDING'),
                          (GETTING, 'GETTING'),
                          (ON_DISK, 'ON_DISK'),
                          (FAILED, 'FAILED'))
-    REQ_STAGE_LIST = ['ON_TAPE', 'GET_PENDING', 'GETTING', 'ON_DISK', 'FAILED']
+    REQ_STAGE_LIST = ['ON_STORAGE', 'GET_PENDING', 'GETTING', 'ON_DISK', 'FAILED']
 
-    stage = models.IntegerField(choices=REQ_STAGE_CHOICES, default=ON_TAPE)
+    stage = models.IntegerField(choices=REQ_STAGE_CHOICES, default=ON_STORAGE)
 
     # user that the request belongs to
-    user = models.ForeignKey(User, help_text="User that the request belongs to")
+    user = models.ForeignKey(User, on_delete=models.CASCADE,
+                             help_text="User that the request belongs to")
 
     # date - the date that the request was registered with the JDMA
     date = models.DateTimeField(blank=True, null=True,
@@ -169,7 +171,8 @@ class MigrationRequest(models.Model):
                                    help_text="Target directory path")
 
     # mapping to the migration details
-    migration = models.ForeignKey(Migration, null=True,
+    migration = models.ForeignKey(Migration, on_delete=models.CASCADE,
+                                  null=True,
                                   help_text="Migration associated with this MigrationRequest")
 
     # failure reason
@@ -186,7 +189,8 @@ class MigrationFile(models.Model):
     # path to the file
     path = models.CharField(max_length=2024, help_text="Absolute path to the file")
     # foreign key to Migration
-    migration = models.ForeignKey(Migration, null=True,
+    migration = models.ForeignKey(Migration, on_delete=models.CASCADE,
+                                  null=True,
                                   help_text="Migration associated with this MigrationFile")
     # SHA-256 digest
     digest = models.CharField(max_length=64, help_text="SHA-256 digest of the file")

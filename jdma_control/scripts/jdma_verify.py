@@ -4,7 +4,7 @@
    to the digest that was calculated (in jdma_transfer) before it was uploaded
    to tape.
    Running this will change the state of the migrations:
-     VERIFYING->ON_TAPE
+     VERIFYING->ON_STORAGE
 """
 
 import os
@@ -93,7 +93,6 @@ def verify_files():
             external_id = pr.migration.external_id
             # get the temporary directory
             verify_dir = os.path.join(settings.JDMA_BACKEND_OBJECT.VERIFY_DIR, "batch{}".format(external_id))
-            print(verify_dir)
             # loop over the MigrationFiles that belong to this Migration
             migration_files = MigrationFile.objects.filter(migration=pr.migration)
             # first check that each file exists in the temporary directory
@@ -120,11 +119,11 @@ def verify_files():
                         pr.migration.save()
                         sys.exit(0)
             # if we reach this part without exiting then the batch has verified successfully and we
-            # can transition to ON_TAPE, ready for the tidy up process
-            pr.migration.stage = Migration.ON_TAPE
+            # can transition to ON_STORAGE, ready for the tidy up process
+            pr.migration.stage = Migration.ON_STORAGE
             send_put_notification_email(pr)
             pr.migration.save()
-            logging.info("Transition: batch ID: {} VERIFYING->ON_TAPE".format(pr.migration.external_id))
+            logging.info("Transition: batch ID: {} VERIFYING->ON_STORAGE".format(pr.migration.external_id))
 
 def run():
     setup_logging(__name__)
