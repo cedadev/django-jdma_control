@@ -8,4 +8,7 @@ psycopg2==2.7.1
 pyparsing==2.2.0
 pytz==2017.2
 six==1.10.0
+feedgen==0.6.1
+feedparser==5.2.1
 -e git+https://github.com/cedadev/jasmin-ldap.git@v0.3#egg=jasmin-ldap
+beautifulsoup4==4.6.0

@@ -61,8 +61,3 @@ def user_has_write_permission(path, user):
 
 def user_has_sufficient_diskspace(path, user, size):
     return True
-
-
-# test
-if __name__ == "__main__":
-    print(user_has_write_permission("/home/nrmassey/jdma_test/weather_at_home_3", "nrmassey"))

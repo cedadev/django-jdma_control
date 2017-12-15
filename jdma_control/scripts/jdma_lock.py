@@ -1,6 +1,6 @@
 """Functions to transition a migration request from:
    ON_DISK -> PUT_PENDING     - locks the directory for migration by changing the owner to root / jdma user
-   ON_TAPE -> GET_PENDING     - create the target directory, and lock it by changing the owner again
+   ON_STORAGE -> GET_PENDING     - create the target directory, and lock it by changing the owner again
 
    This is a simple program that is designed to be run at high-frequency, e.g. every minute even.
 """
@@ -59,7 +59,7 @@ def lock_get_directories():
     get_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.GET)
     # for each GET request get the Migration and determine if the type of the Migration is ON_TAP
     for gr in get_reqs:
-        if gr.stage == MigrationRequest.ON_TAPE and gr.migration.stage == Migration.ON_TAPE:
+        if gr.stage == MigrationRequest.ON_STORAGE and gr.migration.stage == Migration.ON_STORAGE:
             # if it's on tape then:
             # 1. Make the directory if it doesn't exist
             # 2. change the owner of the directory to be root
@@ -72,7 +72,7 @@ def lock_get_directories():
             gr.stage = MigrationRequest.GET_PENDING
             gr.save()
             logging.info("GET: Locked directory: " + gr.target_path)
-            logging.info("Transition: request ID: {} ON_TAPE->GET_PENDING".format(gr.pk))
+            logging.info("Transition: request ID: {} ON_STORAGE->GET_PENDING".format(gr.pk))
 
 
 def run():
