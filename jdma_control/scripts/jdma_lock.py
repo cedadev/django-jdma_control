@@ -12,6 +12,7 @@ import os
 
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
+from django.db.models import Q
 
 
 def setup_logging(module_name):
@@ -33,11 +34,11 @@ def setup_logging(module_name):
 
 
 def lock_put_directories():
-    """Lock the directories that are going to be put to tape.
-       This is to ensure that the user doesn't write any more data to them while the tape write is ongoing.
+    """Lock the directories that are going to be put to external storage.
+       This is to ensure that the user doesn't write any more data to them while the external storage write is ongoing.
     """
     # get the list of PUT requests
-    put_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.PUT)
+    put_reqs = MigrationRequest.objects.filter(Q(request_type=MigrationRequest.PUT) | Q(request_type=MigrationRequest.MIGRATE))
     # for each PUT request get the Migration and determine if the type of the Migration is ON_DISK
     for pr in put_reqs:
         if pr.migration.stage == Migration.ON_DISK:
@@ -53,14 +54,14 @@ def lock_put_directories():
 
 
 def lock_get_directories():
-    """Lock the directories that the targets for recovering data from tape.
+    """Lock the directories that the targets for recovering data from external storage.
        This is to ensure that there aren't any filename conflicts."""
     # get the list of GET requests
     get_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.GET)
     # for each GET request get the Migration and determine if the type of the Migration is ON_TAP
     for gr in get_reqs:
         if gr.stage == MigrationRequest.ON_STORAGE and gr.migration.stage == Migration.ON_STORAGE:
-            # if it's on tape then:
+            # if it's on external storage then:
             # 1. Make the directory if it doesn't exist
             # 2. change the owner of the directory to be root
             # 3. change the read / write permissions to be user-only

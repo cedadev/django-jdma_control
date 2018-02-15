@@ -13,7 +13,7 @@ setup(
     packages=['jdma_control'],
     install_requires=[
         'appdirs',
-        'django==1.11.1',
+        'django',
         'django-sizefield',
         'django-extensions',
         'django-multiselectfield',
@@ -25,11 +25,11 @@ setup(
         'feedgen',
         'feedparser',
         'jasmin-ldap',
-        'beautifulsoup4',
+        'pycryptodome'
     ],
     include_package_data=True,
     license='my License',  # example license
-    description='A Django app to migrate directories of files to elastic tape from groupworkspaces on JASMIN.',
+    description='A Django app to migrate directories of files to external storage from groupworkspaces on JASMIN.',
     long_description=README,
     url='http://www.ceda.ac.uk/',
     author='Neil Massey',

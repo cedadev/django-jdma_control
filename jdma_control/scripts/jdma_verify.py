@@ -1,8 +1,8 @@
-"""Functions to verify files that have been migrated to tape.
-   These files have been put on tape and then (temporarily) pulled back to
+"""Functions to verify files that have been migrated to external storage.
+   These files have been put on external storage and then (temporarily) pulled back to
    disk before being verified by calculating the SHA256 digest and comparing it
    to the digest that was calculated (in jdma_transfer) before it was uploaded
-   to tape.
+   to external storage.
    Running this will change the state of the migrations:
      VERIFYING->ON_STORAGE
 """
@@ -19,6 +19,7 @@ from django.core.mail import send_mail
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest, MigrationFile
 from jdma_control.scripts.jdma_lock import setup_logging
+import jdma_control.backends
 
 def get_permissions_string(p):
     # this is unix permissions
@@ -28,7 +29,7 @@ def get_permissions_string(p):
     return is_dir + ''.join(dic.get(x,x) for x in perm)
 
 
-def send_put_notification_email(put_req):
+def send_put_notification_email(put_req, backend_object):
     """Send an email to the user to notify them that their batch upload has been completed
      var jdma_control.models.User user: user to send notification email to
     """
@@ -43,18 +44,18 @@ def send_put_notification_email(put_req):
     fromaddr = "support@ceda.ac.uk"
 
     # subject
-    subject = "[JDMA] - Notification of batch upload to Elastic Tape"
+    subject = "[JDMA] - Notification of batch upload to external storage " + backend_object.get_name()
     date = datetime.utcnow()
     date_string = "% 2i %s %d %02d:%02d" % (date.day, calendar.month_abbr[date.month], date.year, date.hour, date.minute)
 
-    msg = "PUT request has succesfully completed uploading to Elastic Tape:\n"
+    msg = "PUT request has succesfully completed uploading to external storage: " + backend_object.get_name() + "\n"
     msg+= "    Request id\t\t: " + str(put_req.pk)+"\n"
+    msg+= "    Ex. storage\t\t: " + str(backend_object.get_id())+"\n"
     msg+= "    Batch id\t\t: " + str(put_req.migration.pk)+"\n"
     msg+= "    Workspace\t\t: " + put_req.migration.workspace+"\n"
     msg+= "    Label\t\t\t: " + put_req.migration.label+"\n"
     msg+= "    Date\t\t\t: " + put_req.migration.registered_date.isoformat()[0:16].replace("T"," ")+"\n"
     msg+= "    Stage\t\t\t: " + Migration.STAGE_LIST[put_req.migration.stage]+"\n"
-    msg+= "    Permission\t\t: " + Migration.PERMISSION_LIST[put_req.migration.permission]+"\n"
     msg+= "    Original path\t: " + put_req.migration.original_path+"\n"
     msg+= "    Unix uid\t\t: " + put_req.migration.unix_user_id+"\n"
     msg+= "    Unix gid\t\t: " + put_req.migration.unix_group_id+"\n"
@@ -81,18 +82,19 @@ def calculate_digest(filename):
     return "SHA256: {0}".format(sha256.hexdigest())
 
 
-def verify_files():
-    """Verify the files that have been uploaded to tape and then downloaded
+def verify_files(backend_object):
+    """Verify the files that have been uploaded to external storage and then downloaded
     back to a temporary directory."""
     # these are part of a PUT request
-    put_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.PUT)
+    put_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.PUT,
+                                               storage=backend_object.get_id())
     for pr in put_reqs:
         # Check whether the request is in the verifying stage
         if pr.migration.stage == Migration.VERIFYING:
             # get the batch id
             external_id = pr.migration.external_id
             # get the temporary directory
-            verify_dir = os.path.join(settings.JDMA_BACKEND_OBJECT.VERIFY_DIR, "batch{}".format(external_id))
+            verify_dir = os.path.join(backend_object.VERIFY_DIR, "batch{}".format(external_id))
             # loop over the MigrationFiles that belong to this Migration
             migration_files = MigrationFile.objects.filter(migration=pr.migration)
             # first check that each file exists in the temporary directory
@@ -127,4 +129,5 @@ def verify_files():
 
 def run():
     setup_logging(__name__)
-    verify_files()
+    for backend in jdma_control.backends.get_backends():
+        verify_files(backend)

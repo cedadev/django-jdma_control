@@ -12,7 +12,6 @@ import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 from jdma_control.backends.ElasticTapeBackend import monitor_et_rss_feed
 from jdma_control.backends import FakeTapeSettings as FS_Settings
-from jdma_control.backends import ElasticTapeSettings as ET_Settings
 
 def gen_test_feed():
     """Generate a test RSS(atom) feed."""
@@ -111,7 +110,6 @@ class FakeTapeBackend(Backend):
     def __init__(self):
         """Need to set the verification directory and logging"""
         self.VERIFY_DIR = FS_Settings.VERIFY_DIR
-        self.setup_logging(self.__class__)
 
     def monitor(self):
         """Determine which batches have completed."""
@@ -178,8 +176,11 @@ class FakeTapeBackend(Backend):
             logging.info("PUT: " + fname + " to: " + dest_file)
         return batch_id
 
-    def get_name(self):
-        return "Fake Tape."
+    def get_name():
+        return "Fake Tape"
+
+    def get_id():
+        return "faketape"
 
     def user_has_put_permission(self, username, workspace):
         return Backend.user_has_put_permission(self, username, workspace)
@@ -190,3 +191,10 @@ class FakeTapeBackend(Backend):
     def user_has_put_quota(self, original_path, user, workspace):
         """Get the remaining quota for the user in the workspace"""
         return True
+
+    def required_credentials(self):
+        """Get the keys of the required credentials to use this backend.
+           These keys, along with their values, will be stored in a hidden file in the user's home directory.
+           They will be encrypted and stored in the MigrationRequest so that the daemon processes can carry
+           out the Migrations on behalf of the user."""
+        return []

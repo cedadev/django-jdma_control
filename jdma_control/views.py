@@ -6,6 +6,7 @@ import subprocess
 
 import jdma_site.settings as settings
 import jdma_control.backends
+import jdma_control.backends.AES_tools as AES_tools
 
 class UserView(View):
     """:rest-api
@@ -373,6 +374,8 @@ class MigrationRequestView(View):
             # determine the stage
             if req.request_type == MigrationRequest.PUT:
                 migration_stage = req.migration.stage
+            elif req.request_type == MigrationRequest.MIGRATE:
+                migration_stage = req.migration.stage
             elif req.request_type == MigrationRequest.GET:
                 migration_stage = req.stage + 10            # plus 10 to indicate GET
 
@@ -382,7 +385,8 @@ class MigrationRequestView(View):
                     "migration_id": req.migration.pk,
                     "migration_label": req.migration.label,
                     "workspace": req.migration.workspace,
-                    "stage": migration_stage}
+                    "stage": migration_stage,
+                    "storage": migration.storage}
             if req.date:
                 data["date"] = req.date.isoformat()
         else:
@@ -402,6 +406,8 @@ class MigrationRequestView(View):
                 # determine the stage
                 if r.request_type == MigrationRequest.PUT:
                     migration_stage = r.migration.stage
+                elif r.request_type == MigrationRequest.MIGRATE:
+                    migration_stage = r.migration.stage
                 elif r.request_type == MigrationRequest.GET:
                     migration_stage = r.stage + 10
 
@@ -410,7 +416,8 @@ class MigrationRequestView(View):
                             "migration_id": r.migration.pk,
                             "migration_label": r.migration.label,
                             "workspace": r.migration.workspace,
-                            "stage": migration_stage}
+                            "stage": migration_stage,
+                            "storage": r.storage}
                 if r.date:
                     req_data["date"] = r.date.isoformat()
                 requests.append(req_data)
@@ -429,7 +436,7 @@ class MigrationRequestView(View):
 
                :<jsonarr string name: the user id to use in making the request
                :<jsonarr string workspace: the workspace to use in making the request
-               :<jsonarr string request_type: GET | PUT | VERIFY
+               :<jsonarr string request_type: GET | PUT | MIGRATE
                :<jsonarr string original_path: the path of the original directory (for PUT)
                :<jsonarr string label: (*optional*) a human readable label for the request (for PUT or GET).
                  A default will be derived from the original path if no label is supplied in the POST request.
@@ -461,7 +468,7 @@ class MigrationRequestView(View):
             return HttpError(error_data)
 
         # check request type is "GET", "PUT"
-        if not data["request_type"] in ["GET", "PUT"]:
+        if not data["request_type"] in ["GET", "PUT", "MIGRATE"]:
             error_data["error"] = "Invalid request method."
             return HttpError(error_data)
 
@@ -482,7 +489,8 @@ class MigrationRequestView(View):
             # checks
             #   1. Check that the request id is supplied
             #   2. Check that the request exists
-            #   3. Check that the request belongs to the user, or has group or universal permission
+            #   3a. Check that the backend exists
+            #   3b. Check that the request belongs to the user, or has group or universal permission
             #   4. Check that the stage is ON_STORAGE
             #   5. Check the user has permission to write to the target directory (or original path if not set)
             #   6. Check whether this is a duplicate
@@ -502,8 +510,15 @@ class MigrationRequestView(View):
                 error_data["error"] = "Batch not found."
                 return HttpError(error_data)
 
-            #   3. check that the migration belongs to the user, or has group or universal permission
-            if not settings.JDMA_BACKEND_OBJECT.user_has_get_permission(mig, user.name, mig.workspace):
+            #   3a. check that the backend exists
+            JDMA_BACKEND_OBJECT = jdma_control.backends.Backend.get_backend_object(mig.storage)
+            # not found, return error
+            if JDMA_BACKEND_OBJECT == None:
+                error_data["error"] = "External storage: " + mig.storage + " does not exist."
+                return HttpError(error_data, status=404)
+
+            #   3b. check that the migration belongs to the user, or has group or universal permission
+            if not JDMA_BACKEND_OBJECT.user_has_get_permission(mig, user.name, mig.workspace):
                 error_data["error"] = "User " + user.name + " does not have permission to request the batch."
                 return HttpError(error_data)
 
@@ -562,7 +577,7 @@ class MigrationRequestView(View):
             return_data["label"] = migration_request.migration.label
             return_data["target_path"] = target_path
 
-        elif data["request_type"] == "PUT":
+        elif data["request_type"] == "PUT" or data["request_type"] == "MIGRATE":
             # check workspace is in request
             if not "workspace" in data:
                 error_data["error"] = "No workspace supplied."
@@ -572,28 +587,34 @@ class MigrationRequestView(View):
             if not "original_path" in data:
                 error_data["error"] = "No directory path supplied."
                 return HttpError(error_data)
+
+            original_path = data["original_path"]
+            # remove any trailing slash
+            if original_path[-1] == "/":
+                original_path = original_path[:-1]
+
+            # check that there is not already an entry with this path
+            if Migration.objects.filter(original_path=original_path):
+                error_data["error"] = "Directory " + original_path + " is already in a migration."
+                return HttpError(error_data)
+
+            # check for the label in the request - if not then derive from directory name
+            if "label" in data:
+                label = data["label"]
             else:
-                original_path = data["original_path"]
-                # remove any trailing slash
-                if original_path[-1] == "/":
-                    original_path = original_path[:-1]
+                label = original_path.split("/")[-1]
 
-                # check that there is not already an entry with this path
-                if Migration.objects.filter(original_path=original_path):
-                    error_data["error"] = "Directory " + original_path + " is already in a migration."
-                    return HttpError(error_data)
+            # check the storage is in the request
+            if not "storage" in data:
+                error_data["error"] = "External storage not specified in PUT / MIGRATE request"
+                return HttpError(error_data)
 
-                # check for the label in the request - if not then derive from directory name
-                if "label" in data:
-                    label = data["label"]
-                else:
-                    label = original_path.split("/")[-1]
-
-            # three checks:
+            # five checks:
             #   1. Check the path exists (obvs.)
             #   2. Check the user has write permission to the directory
-            #   3. Check user has write permission in group workspace
-            #   4. Check the user has enough space in their ET quota
+            #   3. Check that the backend exists and that the required_credentials were supplied
+            #   4. Check user has write permission in group workspace
+            #   5. Check the user has enough space in their storage quota
 
             # 1. check that the path exists
             if not os.path.isdir(original_path):
@@ -605,15 +626,28 @@ class MigrationRequestView(View):
                 error_data["error"] = "User does not have write permission to the directory " + original_path
                 return HttpError(error_data, status=403)
 
-            # 3. check group workspace permission
-            if not settings.JDMA_BACKEND_OBJECT.user_has_put_permission(data["name"], data["workspace"]):
+            # 3. check that the named backend exists
+            JDMA_BACKEND_OBJECT = jdma_control.backends.Backend.get_backend_object(data["storage"])
+            # not found, return error
+            if JDMA_BACKEND_OBJECT == None:
+                error_data["error"] = "External storage: " + data["storage"] + " does not exist."
+                return HttpError(error_data, status=404)
+
+            # check whether the credentials are supplied, return error if not
+            if not JDMA_BACKEND_OBJECT.check_credentials_supplied(data["credentials"]):
+                error_data["error"] = "Required credentials for: " + data["storage"] + " not supplied."+\
+                                      "  Required credentials for " + data["storage"] + " are: " + ", ".join(required_credentials) + " " + str(supplied_credentials.keys())
+                return HttpError(error_data, status=404)
+
+            # 4. check group workspace permission
+            if not JDMA_BACKEND_OBJECT.user_has_put_permission(data["name"], data["workspace"]):
                 error_data["error"] = "User " + data["name"] + " does not have write permissions or the workspace " +\
-                                      data["workspace"] + " does not exist for " + settings.JDMA_BACKEND_OBJECT.get_name()
+                                      data["workspace"] + " does not exist for " + JDMA_BACKEND_OBJECT.get_name()
                 return HttpError(error_data, status=403)
 
-            # 4. check et_quota ** TO DO ** implement this function!
-            if not settings.JDMA_BACKEND_OBJECT.user_has_put_quota(original_path, data["name"], data["workspace"]):
-                error_data["error"] = "Insufficient remaining quota for " + settings.JDMA_BACKEND_OBJECT.get_name()
+            # 5. check et_quota ** TO DO ** implement this function!
+            if not JDMA_BACKEND_OBJECT.user_has_put_quota(original_path, data["name"], data["workspace"]):
+                error_data["error"] = "Insufficient remaining quota for " + JDMA_BACKEND_OBJECT.get_name()
                 return HttpError(error_data, status=403)
 
             # All the checks have passed, so we can now add the request to the JDMA database
@@ -657,6 +691,9 @@ class MigrationRequestView(View):
             # path
             migration.original_path = original_path
 
+            # external storage
+            migration.storage = data["storage"]
+
             # save the migration to the database
             migration.save()
 
@@ -664,18 +701,26 @@ class MigrationRequestView(View):
             migration_request.migration = migration
             # set the migration request to be ON_DISK as that makes sense
             migration_request.stage = MigrationRequest.ON_DISK
+            # storage
+            migration_request.storage = data["storage"]
+            # credentials - we encrypt these using AES EAX mode
+            key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
+            migration_request.credentials = AES_tools.AES_encrypt_dict(key, data["credentials"])
+
             migration_request.save()
 
             # build the return data
             return_data = data
             return_data["request_id"] = migration.pk
             return_data["request_type"] = migration_request.request_type
+            return_data["storage"] = migration_request.storage
             return_data["stage"] =  migration.stage
             return_data["registered_date"] = migration.registered_date.isoformat()
             return_data["label"] = migration.label
             return_data["unix_user_id"] = migration.unix_user_id
             return_data["unix_group_id"] = migration.unix_group_id
             return_data["unix_permission"] = migration.unix_permission
+            # don't return the credentials!
 
         return HttpResponse(json.dumps(return_data), content_type="application/json")
 
@@ -720,7 +765,7 @@ class MigrationView(View):
                     "workspace": mig.workspace,
                     "label": mig.label,
                     "stage": mig.stage,
-                    "permission": mig.permission}
+                    "storage": mig.storage}
             # add the optional data if it's there
             if mig.external_id:
                 data["external_id"] = mig.external_id
@@ -762,7 +807,7 @@ class MigrationView(View):
                             "workspace": m.workspace,
                             "label": m.label,
                             "stage": m.stage,
-                            "permission": m.permission}
+                            "storage": m.storage}
                 if m.registered_date:
                     mig_data["registered_date"] = m.registered_date.isoformat()
                 migrations.append(mig_data)
@@ -830,13 +875,17 @@ class MigrationView(View):
         if "label" in data:
             migration.label = data["label"]
 
-        if "permission" in data:
-            if data["permission"] == "ALL":
-                migration.permission = Migration.PERMISSION_ALL
-            elif data["permission"] == "PRIVATE":
-                migration.permission = Migration.PERMISSION_PRIVATE
-            elif data["permission"] == "GROUP":
-                migration.permission = Migration.PERMISSION_GROUP
         migration.save()
 
         return HttpResponse(json.dumps({"none":"none"}), content_type="application/json")
+
+
+def list_backends(request):
+    """Return a list of backends, i.e. targets for the data migration.
+       Examples are 'elastictape' and 'objectstore'"""
+
+    data = {}
+    for be in jdma_control.backends.get_backends():
+        data[be.get_id()] = be.get_name()
+
+    return HttpResponse(json.dumps(data), content_type="application/json")

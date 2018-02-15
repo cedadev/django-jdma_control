@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+        'django.contrib.postgres',
         'django_extensions',
         'jdma_control',
     ]
@@ -92,6 +93,12 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
+# IMPORTANT: CookieStorage (and hence FallbackStorage, which is the default) interacts
+#            badly with Chrome's prefetching, causing messages to be rendered twice
+#            or not at all...!
+MESSAGE_STORAGE = 'django.contrib.messages.storage.session.SessionStorage'
+
+
 # Internationalization
 LANGUAGE_CODE = 'en-gb'
 TIME_ZONE = 'UTC'
@@ -112,6 +119,9 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL = 'jdma@jdma.ceda.ac.uk'
 
 
 
+# Read the encrypt / decrypt key from a file
+ENCRYPT_KEY_FILE = '/home/vagrant/JDMA/conf/encrypt_key.txt'
+
 # Put your custom settings here.
 ALLOWED_HOSTS=["192.168.51.26",
                "192.168.51.26"]
@@ -125,4 +135,3 @@ JDMA_LDAP_REPLICAS = ["ldap://marge.esc.rl.ac.uk", "ldap://wiggum.jc.rl.ac.uk"]
 
 LOG_PATH = "/var/log/jdma"
 
-JDMA_BACKEND = "ElasticTapeBackend"

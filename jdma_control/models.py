@@ -2,7 +2,8 @@ from __future__ import unicode_literals
 
 from django.db import models
 from django.utils.encoding import python_2_unicode_compatible
-
+from django.contrib.postgres.operations import HStoreExtension
+from django.contrib.postgres.fields import HStoreField
 
 @python_2_unicode_compatible
 class User(models.Model):
@@ -11,7 +12,7 @@ class User(models.Model):
     HTTP API.
     :var models.CharField name: the user name / id of the user
     :var models.EmailField email: email address of the user
-    :var models.BooleanField notify: whether to notify the user when the migrations to / from tape have completed, default = True"""
+    :var models.BooleanField notify: whether to notify the user when the migrations to / from storage have completed, default = True"""
 
     name = models.CharField(max_length=254, help_text="Name of user - should be same as JASMIN user name")
     email = models.EmailField(max_length=254, help_text="Email of user")
@@ -31,23 +32,25 @@ class Migration(models.Model):
 
        - ** ONDISK (0) The directory is on disk and is writable by the user
 
-       - ** PUT_PENDING (1) The directory has been locked and the request is queued to transfer ** TO ** tape
+       - ** PUT_PENDING (1) The directory has been locked and the request is queued to transfer ** TO ** storage
 
-       - ** PUTTING (2) The directory is currently being transferred ** TO ** tape
+       - ** PUTTING (2) The directory is currently being transferred ** TO ** storage
 
        - ** VERIFY_PENDING (3) The directory is queued for VERIFYING
 
-       - ** VERIFYING (4) The files are being fetched back from tape and compared to their SHA256 digests
+       - ** VERIFYING (4) The files are being fetched back from storage and compared to their SHA256 digests
 
-       - ** ONTAPE (5) The directory is on tape
+       - ** ONSTORAGE (5) The directory is on storage
 
-       - ** GET_PENDING (6) The directory has been locked and the request is queued to transfer ** FROM ** tape
+       - ** GET_PENDING (6) The directory has been locked and the request is queued to transfer ** FROM ** storage
 
-       - ** GETTING (7) The directory is currently being transferred ** FROM ** tape
+       - ** GETTING (7) The directory is currently being transferred ** FROM ** storage
 
        - ** FAILED (8)
     """
 
+    # default backend
+    default_backend = "elastictape"
 
     # user that the directory belongs to
     user = models.ForeignKey(User, on_delete=models.CASCADE,
@@ -57,8 +60,8 @@ class Migration(models.Model):
     workspace = models.CharField(max_length=2024,
                                  help_text="Workspace used for this request")
 
-    # stages for tape transfer - to tape.  There is a strict one to one mapping
-    # for the data->tape record, and therefore a one to one mapping for the
+    # stages for storage transfer - to storage.  There is a strict one to one mapping
+    # for the data->storage record, and therefore a one to one mapping for the
     # data and the PUT migration.
     # For the GET migration, there may be many requests for one migration and
     # so the GET stages are in the migration request model
@@ -83,18 +86,7 @@ class Migration(models.Model):
                   'VERIFY_GETTING', 'VERIFYING', 'ON_STORAGE', 'FAILED']
     stage = models.IntegerField(choices=STAGE_CHOICES, default=FAILED)
 
-    # CHOICES for the permissions for batches
-    PERMISSION_PRIVATE = 0      # only the user can download / request the migrations
-    PERMISSION_GROUP = 1        # anyone in the group workspace can request
-    PERMISSION_ALL = 2          # anyone can request it
-
-    PERMISSION_CHOICES = ((PERMISSION_PRIVATE, 'PRIVATE'),
-                          (PERMISSION_GROUP, 'GROUP'),
-                          (PERMISSION_ALL, 'ALL'))
-    PERMISSION_LIST = ['PRIVATE', 'GROUP', 'ALL']
-    permission = models.IntegerField(choices=PERMISSION_CHOICES, default=PERMISSION_PRIVATE)
-
-    # batch id for elastic tape
+    # batch id for external storage
     external_id = models.IntegerField(blank=True,null=True,
                                       help_text="Batch id for external backup system, e.g. elastic tape or object store")
 
@@ -118,6 +110,11 @@ class Migration(models.Model):
     unix_permission = models.IntegerField(blank=True, null=True,
                                           help_text="File permissions of original directory")
 
+    # the backend external storage location of the migration
+    storage = models.CharField(blank=False, null=False, max_length=256,
+                               default=default_backend,
+                               help_text="External storage location of the migration, e.g. elastictape or objectstore")
+
     # failure reason
     failure_reason = models.CharField(blank=True, null=True, max_length=1024,
                                       help_text="Reason for failure of request")
@@ -133,14 +130,18 @@ class Migration(models.Model):
 @python_2_unicode_compatible
 class MigrationRequest(models.Model):
     """A request to migrate (PUT) or retrieve (GET) a directory via the JASMIN data migration app (JDMA)."""
+
     # request type - GET or PUT or ?VERIFY?
     PUT = 0
     GET = 1
+    MIGRATE = 2
 
     __REQUEST_CHOICES = ((PUT, 'PUT'),
-                         (GET, 'GET'))
+                         (GET, 'GET'),
+                         (MIGRATE, 'MIGRATE'))
     REQUEST_MAP = {"PUT" : PUT,
-                   "GET" : GET}
+                   "GET" : GET,
+                   "MIGRATE" : MIGRATE}
     request_type = models.IntegerField(choices=__REQUEST_CHOICES)
 
     ON_STORAGE = 0
@@ -174,6 +175,15 @@ class MigrationRequest(models.Model):
     migration = models.ForeignKey(Migration, on_delete=models.CASCADE,
                                   null=True,
                                   help_text="Migration associated with this MigrationRequest")
+
+    # the backend external storage location of the migration - only need for PUT and MIGRATE requests
+    storage = models.CharField(blank=False, null=False, max_length=256,
+                               default=Migration.default_backend,
+                               help_text="External storage location of the migration, e.g. elastictape or objectstore")
+
+    # backend external storage credentials - keep as a hstore - i.e. key value store
+    credentials = HStoreField(null=True,
+                              help_text="Credentials required to access the external storage (encrypted)")
 
     # failure reason
     failure_reason = models.CharField(blank=True, null=True, max_length=1024,
