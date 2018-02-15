@@ -1,7 +1,7 @@
 appdirs==1.4.3
-Django==1.11.1
-django-extensions==1.7.9
-django-multiselectfield==0.1.7
+Django==2.0.2
+django-extensions==1.9.9
+django-multiselectfield==0.1.8
 django-sizefield==0.9.1
 packaging==16.8
 psycopg2==2.7.1
@@ -10,5 +10,5 @@ pytz==2017.2
 six==1.10.0
 feedgen==0.6.1
 feedparser==5.2.1
+pycryptodome==3.4.11
 -e git+https://github.com/cedadev/jasmin-ldap.git@v0.3#egg=jasmin-ldap
-beautifulsoup4==4.6.0

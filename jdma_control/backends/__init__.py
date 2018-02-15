@@ -1,3 +1,7 @@
-from jdma_control.backends import FakeTapeBackend#, ElasticTapeBackend , ObjectStoreBackend
-import jdma_site.settings as settings
-settings.JDMA_BACKEND_OBJECT = eval(settings.JDMA_BACKEND+"."+settings.JDMA_BACKEND+"()")
+"""Function to get the backends"""
+from  jdma_control.backends import ElasticTapeBackend, FakeTapeBackend, ObjectStoreBackend
+
+def get_backends():
+    return [ElasticTapeBackend.ElasticTapeBackend,
+            FakeTapeBackend.FakeTapeBackend,
+            ObjectStoreBackend.ObjectStoreBackend]

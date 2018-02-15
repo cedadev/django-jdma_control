@@ -2,4 +2,4 @@
  Control
 =====
 
-A Django app to migrate directories of files to elastic tape from groupworkspaces on JASMIN.
+A Django app to migrate directories of files to external storage from groupworkspaces on JASMIN.

@@ -90,10 +90,8 @@ def monitor_et_rss_feed(feed):
     # need to do this backwards to get the mappings between the retrieval id and
     # batch id before the check for GET_COMPLETE is done
     for item in et_rss['items'][::-1]:
-        print (item)
         if 'description' in item:
             rss_i = interpret_rss_status(item['description'])
-            print(rss_i.status, rss_i.id, rss_i.date)
             if rss_i.status == GET_COMPLETE:
                 completed_GETs.append(rss_i)
             elif rss_i.status == PUT_COMPLETE:
@@ -108,7 +106,6 @@ class ElasticTapeBackend(Backend):
     def __init__(self):
         """Need to set the verification directory and logging"""
         self.VERIFY_DIR = ET_Settings.VERIFY_DIR
-        self.setup_logging(self.__class__)
 
     def monitor(self):
         """Determine which batches have completed."""
@@ -141,7 +138,6 @@ class ElasticTapeBackend(Backend):
                 batch.addFile(fp)
         # register the batch and get the id
         logging.info("Finished adding files, sending batch to ET server: "+ ET_Settings.PUT_HOST)
-        print(batch.requester)
         batch_id = batch.register()
 
         logging.info("Batch with id: " + str(batch_id) + " created successfully")
@@ -187,15 +183,29 @@ class ElasticTapeBackend(Backend):
 
         else:
             # just run the normal du command
-            try:
+            #try:
+            if True:
                 du_output = subprocess.check_output(["/usr/bin/du", "-s", original_path])
                 # get the path size from the first element of the split string
                 path_size = int(du_output.split()[0])
-            except:
+            else:
+            #except:
                 raise Exception("Error with du command")
 
         return quota_remaining > path_size
 
 
-    def get_name(self):
+    def get_name():
         return "Elastic Tape"
+
+
+    def get_id():
+        return "elastictape"
+
+
+    def required_credentials(self):
+        """Get the keys of the required credentials to use this backend.
+           These keys, along with their values, will be stored in a hidden file in the user's home directory.
+           They will be encrypted and stored in the MigrationRequest so that the daemon processes can carry
+           out the Migrations on behalf of the user."""
+        return []
