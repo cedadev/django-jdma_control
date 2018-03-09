@@ -12,7 +12,9 @@ import os
 import logging
 import shutil
 
-from jdma_control.models import Migration, MigrationRequest
+from django.db.models import Q
+
+from jdma_control.models import Migration, MigrationRequest, StorageQuota
 from jdma_control.scripts.jdma_lock import setup_logging
 
 import jdma_control.backends
@@ -20,8 +22,12 @@ import jdma_control.backends
 def remove_verification_files(backend_object):
     """Remove those temporary files that have been created in the verification step"""
     # these occur during a PUT request
-    put_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.PUT,
-                                               storage=backend_object.get_id())
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    put_reqs = MigrationRequest.objects.filter(
+        (Q(request_type=MigrationRequest.PUT)
+        | Q(request_type=MigrationRequest.MIGRATE))
+        & Q(migration__storage__storage=storage_id)
+    )
     for pr in put_reqs:
         # only do it if the files are on external storage
         if pr.migration.stage == Migration.ON_STORAGE:
@@ -40,22 +46,49 @@ def remove_verification_files(backend_object):
 def remove_original_files(backend_object):
     """Remove the original files.  This is the whole point of the migration!"""
     # these occur during a PUT request
-    put_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.PUT,
-                                               storage=backend_object.get_id())
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    put_reqs = MigrationRequest.objects.filter(
+        (Q(request_type=MigrationRequest.PUT)
+        | Q(request_type=MigrationRequest.MIGRATE))
+        & Q(migration__storage__storage=storage_id)
+    )
     for pr in put_reqs:
         # only do it if the files are on external storage
         if pr.migration.stage == Migration.ON_STORAGE:
-            if os.path.isdir(pr.migration.original_path):
-                shutil.rmtree(pr.migration.original_path)
-                logging.info("TIDY: deleting directory " + pr.migration.original_path)
-            else:
-                logging.error("TIDY: cannot delete directory " + pr.migration.original_path)
+            # loop over the files in the filelist
+            for fd in pr.migration.filelist:
+                # check whether it's a directory: walk if it is
+                if os.path.isdir(fd):
+                    # delete the whole directory!
+                    try:
+                        shutil.rmtree(fd)
+                        logging.info((
+                            "TIDY: deleting directory {}"
+                        ).format(fd))
+                    except Exception as e:
+                        logging.info((
+                            "TIDY: could not delete directory {} : {}"
+                        ).format(fd, str(e)))
+                else:
+                    try:
+                        os.unlink(fd)
+                        logging.info((
+                            "TIDY: deleting file {}"
+                        ).format(fd))
+                    except Exception as e:
+                        logging.info((
+                            "TIDY: could not delete file {} : {}"
+                        ).format(fd, str(e)))
 
 
 def remove_put_requests(backend_object):
     """Remove the put requests that are ON_STORAGE"""
-    put_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.PUT,
-                                               storage=backend_object.get_id())
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    put_reqs = MigrationRequest.objects.filter(
+        (Q(request_type=MigrationRequest.PUT)
+        | Q(request_type=MigrationRequest.MIGRATE))
+        & Q(migration__storage__storage=storage_id)
+    )
     for pr in put_reqs:
         # only do it if the files are on external storage
         if pr.migration.stage == Migration.ON_STORAGE:
@@ -65,9 +98,13 @@ def remove_put_requests(backend_object):
 
 def remove_get_requests(backend_object):
     """Remove the get requests that are ON_DISK"""
-    get_reqs = MigrationRequest.objects.filter(request_type=MigrationRequest.GET,
-                                               stage=MigrationRequest.ON_DISK,
-                                               storage=backend_object.get_id())
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    # Get the PUT requests for this backend.
+    # This involves resolving two foreign keys
+    get_reqs = MigrationRequest.objects.filter(
+        Q(request_type=MigrationRequest.GET)
+        & Q(migration__storage__storage=storage_id)
+    )
     for gr in get_reqs:
         # only do it if the files are on external storage
         if gr.migration.stage == Migration.ON_STORAGE:
@@ -81,7 +118,8 @@ def run():
     # on / off if we wish
     # loop over all backends
     for backend in jdma_control.backends.get_backends():
-        remove_verification_files(backend)
-        remove_original_files(backend)
-        remove_put_requests(backend)
-        remove_get_requests(backend)
+        backend_object = backend()
+        remove_verification_files(backend_object)
+        remove_original_files(backend_object)
+        remove_put_requests(backend_object)
+        remove_get_requests(backend_object)

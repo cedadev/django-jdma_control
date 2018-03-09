@@ -25,11 +25,13 @@ setup(
         'feedgen',
         'feedparser',
         'jasmin-ldap',
-        'pycryptodome'
+        'pycryptodome',
+        'boto3'
     ],
     include_package_data=True,
     license='my License',  # example license
-    description='A Django app to migrate directories of files to external storage from groupworkspaces on JASMIN.',
+    description=('A Django app to migrate directories of files to external'
+                 'storage from groupworkspaces on JASMIN.'),
     long_description=README,
     url='http://www.ceda.ac.uk/',
     author='Neil Massey',
@@ -38,7 +40,7 @@ setup(
         'Environment :: Web Environment',
         'Framework :: Django',
         'Intended Audience :: Developers',
-        'License :: OSI Approved :: BSD License', # example license
+        'License :: OSI Approved :: BSD License',  # example license
         'Operating System :: OS Independent',
         'Programming Language :: Python',
         # Replace these appropriately if you are stuck on Python 2.
