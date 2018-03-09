@@ -1,3 +1,204 @@
+Details of the state machine (new version, 09/03/2018)
+======================================================
+
+The state machine has been written to improve understanding and maintainability.
+The main change is the recognition that, even for a Migration, most of the state
+can be contained in the MigrationRequest.  This is because, even though many
+GET MigrationRequests can point to a single Migration, for PUT MigrationRequests
+there is a strict 1:1 mapping between the Migration and the MigrationRequest
+
+Migrations now have only three states:
+
+1. ON_DISK      (the filelist in the migration has been scheduled for upload but
+                 not started)
+2. ON_STORAGE   (the files in the filelist have been copied to the external
+                 storage and deleted from the original storage)
+3. FAILED       (something went wrong - record the failure reason in the
+                 Migration request)
+
+MigrationRequests now have many more states and handle all states of the data
+transfer.  One task per operation.
+MigrationRequests can now also be locked to prevent concurrent processes trying
+to carry out two operations on a single Migration.
+
+For PUT requests:
+1.  PUT_START
+2.  PUT_PENDING
+3.  PUT_PACK
+4.  PUTTING
+5.  VERIFY_PENDING
+6.  VERIFY_GETTING
+7.  VERIFYING
+8.  PUT_TIDY
+9.  PUT_COMPLETED
+
+For GET requests
+10. GET_START
+11. GET_PENDING
+12. GETTING
+13. GET_UNPACK
+14. GET_RESTORE
+15. GET_TIDY
+16. GET_COMPLETED
+
+There now follows a description of which operations are carried out when the
+machine is in a particular start, which of the daemons carries out these
+operations and the transition to the next stage in the state machine.
+last_archive is used to keep track of which archive is being acted upon so
+that if the script is interrupted it can be resumed from the last_archive.
+
+1.  PUT START
+=============
+script: jdma_lock ->
+tasks:
+    lock the migration files (transfer ownership to root)
+    create a filelist for directories
+    create the MigrationFiles
+    create the MigrationArchives
+    assign the MigrationFiles to the MigrationArchives bases on size so that no
+    MigrationArchive size is less than the backends minimum object size
+transition:
+    PUT_START->PUT_PENDING
+
+2.  PUT_PENDING
+===============
+script: jdma_transfer ->
+tasks:
+    create an upload batch on the external storage backend
+    set last_archive to 0
+transition:
+    PUT_PENDING->PUT_PACKING
+
+3.  PUT_PACKING
+===============
+script: jdma_packing -> (new script)
+tasks:
+    create the staging directory
+    create the tarfile MigrationArchives in the staging directory and add the
+      MigrationFiles to the MigrationArchives
+    calculate the digests of the MigrationArchives
+    set last_archive to 0
+transition:
+    PUT_PACKING->PUTTING
+
+4.  PUTTING
+===========
+script: jdma_transfer ->
+tasks:
+    upload the MigrationArchives to the external storage backend
+    close the upload batch on the external storage backend
+transition:
+    PUTTING->VERIFY_PENDING
+
+5.  VERIFY_PENDING
+==================
+script: jdma_transfer -> (move to jdma_verify?)
+tasks:
+    create the temporary verification directory
+    set last_archive to 0
+transition:
+    VERIFY_PENDING->VERIFY_GETTING
+
+6.  VERIFY_GETTING
+==================
+script: jdma_transfer ->
+tasks:
+    download the MigrationArchives to the temporary verification directory
+transition:
+    VERIFY_GETTING->VERIFYING
+
+7.  VERIFYING
+=============
+script: jdma_verify ->
+tasks:
+    verify the MigrationArchive files - make sure that the digest of the
+    downloaded archive matches that of the digest calculated in PUT_PACKING
+    send the notification email that the Migration has completed successfully
+    set the Migration to ON_STORAGE
+    set last_archive to 0
+transition:
+    VERIFYING->PUT_TIDY
+
+8.  PUT_TIDY
+=============
+script: jdma_tidy ->
+tasks:
+    delete the staged archive tarfiles (created in PUT_PACKING)
+    delete the verified downloaded archive tarfiles (create in VERIFY_GETTING)
+transition:
+    PUT_TIDY->PUT_COMPLETED
+
+9.  PUT_COMPLETED
+=================
+script: jdma_tidy ->
+tasks:
+    delete the MigrationRequest
+    subtract the uploaded amount (sum of MigrationArchives) from the
+      groupworkspace quota
+transition:
+    none, the MigrationRequest has been deleted
+
+10. GET_START
+=============
+script: jdma_transfer ->
+tasks:
+    create the target directory for the download
+    create the download staging directory
+transition:
+    GET_START->GET_PENDING
+
+11. GET_PENDING
+================
+script: jdma_transfer ->
+tasks:
+    create a download batch on the external storage
+    set last_archive to 0
+transition:
+    GET_PENDING->GETTING
+
+12. GETTING
+===========
+script: jdma_transfer ->
+tasks:
+    download the MigrationArchives to the download staging directory
+    set last_archive to 0
+transition:
+    GETTING->GET_UNPACK
+
+13. GET_UNPACK
+==============
+script: jdma_packing -> (new script)
+tasks:
+    unpack the tar archives from the download staging directory to the target
+      directory
+      set last_archive to 0
+transition:
+    GET_UNPACK->GET_RESTORE
+
+14. GET_RESTORE
+===============
+script: jdma_transfer -> (or jdma_packing? or a new script)
+tasks:
+    restore the uid, gid and permissions to the files unpacked from the tar
+      archive
+transition:
+    GET_RESTORE->GET_TIDY
+
+15. GET_TIDY
+============
+tasks:
+    delete the files from the download staging directory
+transition:
+    GET_TIDY->GET_COMPLETED
+
+16. GET_COMPLETED
+=================
+script: jdma_tidy ->
+tasks:
+    delete the MigrationRequest
+transition:
+    none, the MigrationRequest has been deleted
+
 In development / test mode:
 
 First become root: `sudo su`

@@ -5,19 +5,13 @@ from datetime import datetime
 import feedparser
 import os
 import re
-import requests
 import subprocess
-from xml.dom.minidom import parseString
 
 # Import elastic_tape client library after logging is set up
 import elastic_tape.client
 from elastic_tape.shared.error import StorageDError
 import jdma_site.settings as settings
 from jdma_control.backends import ElasticTapeSettings as ET_Settings
-
-# LDAP imports
-from jasmin_ldap.core import *
-from jasmin_ldap.query import *
 
 # statuses for the RSS items
 PUT_COMPLETE = 0
@@ -106,17 +100,18 @@ class ElasticTapeBackend(Backend):
     def __init__(self):
         """Need to set the verification directory and logging"""
         self.VERIFY_DIR = ET_Settings.VERIFY_DIR
+        self.ARCHIVE_STAGING_DIR = ET_Settings.ARCHIVE_STAGING_DIR
 
     def monitor(self):
         """Determine which batches have completed."""
         completed_PUTs, completed_GETs = monitor_et_rss_feed(ET_Settings.ET_RSS_FILE)
         return completed_PUTs, completed_GETs
 
-    def get(self, batch_id, user, workspace, target_dir):
+    def get(self, batch_id, user, workspace, target_dir, credentials):
         """Download a batch of files from the Elastic Tape to a target directory."""
         pass
 
-    def put(self, filelist, user, workspace):
+    def put(self, filelist, user, workspace, credentials):
         """Put a list of files onto the Elastic Tape - return the external storage batch id"""
         # create connection to Elastic tape
         conn = elastic_tape.client.connect(ET_Settings.PUT_HOST, ET_Settings.PORT)
@@ -143,32 +138,15 @@ class ElasticTapeBackend(Backend):
         logging.info("Batch with id: " + str(batch_id) + " created successfully")
         return int(batch_id)
 
-    def user_has_put_permission(self, username, workspace):
-        return Backend.user_has_put_permission(self, username, workspace)
+    def user_has_put_permission(self, username, workspace, credentials):
+        return Backend.user_has_put_permission(self, username, workspace, credentials)
 
-    def user_has_get_permission(self, migration, username, workspace):
-        return Backend.user_has_get_permission(self, migration, username, workspace)
+    def user_has_get_permission(self, migration, username, workspace, credentials):
+        return Backend.user_has_get_permission(self, migration, username, workspace, credentials)
 
-    def user_has_put_quota(self, original_path, user, workspace):
+    def user_has_put_quota(self, original_path, user, workspace, credentials):
         """Get the remaining quota for the user in the workspace"""
-        # This requires interpreting a webpage at http://et-monitor.fds.rl.ac.uk/et_user/ET_Holdings_Summary_XML.php
-        # build the url to the table
-        quota_url = ET_Settings.ET_QUOTA_URL + "?workspace="+workspace+"&caller=etjasmin"
-        quota_xml = requests.get(quota_url)
-        if quota_xml.status_code != 200:
-            raise Exception("Could not read quota URL: " + quota_url)
-        # try parsing the XML into a XML dom
-        try:
-            # get the quota amount and the quota used
-            quota_dom = parseString(quota_xml.content)
-            quota = int(quota_dom.getElementsByTagName("quota")[0].firstChild.data)
-            quota_used = int(quota_dom.getElementsByTagName("quota_used")[0].firstChild.data)
-            quota_dom.unlink()
-            # calculate remaining quota
-            quota_remaining = quota - quota_used
-        except:
-            raise Exception("Could not parse XML document at: " + quota_url)
-
+        return True
         # now get the size of the original_path directory
         # if pan_du exists then use it, otherwise use du
         if os.path.exists(ET_Settings.PAN_DU_EXE):
@@ -195,11 +173,11 @@ class ElasticTapeBackend(Backend):
         return quota_remaining > path_size
 
 
-    def get_name():
+    def get_name(self):
         return "Elastic Tape"
 
 
-    def get_id():
+    def get_id(self):
         return "elastictape"
 
 
@@ -209,3 +187,8 @@ class ElasticTapeBackend(Backend):
            They will be encrypted and stored in the MigrationRequest so that the daemon processes can carry
            out the Migrations on behalf of the user."""
         return []
+
+
+    def minimum_object_size(self):
+        """Minimum recommend size for elastic tape = 1GB? (check with Kev O'Neil)"""
+        return 1*10**9
