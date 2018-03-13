@@ -44,7 +44,6 @@ def calculate_digest(filename):
             if not data:  # EOF
                 break
             sha256.update(data)
-#    return "SHA256: {0}".format(sha256.hexdigest())
     return "{0}".format(sha256.hexdigest())
 
 
@@ -80,7 +79,10 @@ def get_file_info_tuple(filepath, user_name, conn):
     fstat = os.stat(filepath)
     size = fstat.st_size
     # calc SHA256 digest
-    digest = calculate_digest(filepath)
+    if os.path.isdir(filepath):
+        digest = 0
+    else:
+        digest = calculate_digest(filepath)
     # get the unix user id owner of the file - use LDAP now
     # query to find username with uidNumber matching fstat.st_uid - default to
     # user
@@ -105,7 +107,8 @@ def get_file_info_tuple(filepath, user_name, conn):
         unix_group_id = query[0]["cn"][0]
 
     # get the unix permissions
-    unix_permission = (fstat.st_mode & 0o777)
+    unix_permission = "{}".format(oct(fstat.st_mode))
+    unix_permission = int(unix_permission[-3:])
     return FileInfo(
         filepath,
         size,
@@ -120,101 +123,125 @@ def lock_migration(pr, conn):
     """Move this to it's own function so that it opens the possibility of
     threading later on
     """
-    if pr.migration.stage == Migration.ON_DISK:
-        # loop over the files or directories - copy full paths and other info
-        # about the file into a list
-        fileinfos = []
-        for fd in pr.migration.filelist:
-            # check whether it's a directory: walk if it is
-            if os.path.isdir(fd):
-                # create the file list of all the files and directories under
-                # the original directory
-                # don't follow symbolic links!
-                user_file_list = os.walk(fd, followlinks=False)
-                for root, dirs, files in user_file_list:
-                    if len(files) != 0:
-                        for fl in files:
-                            # get the full path and append to the list
-                            filepath = os.path.join(root, fl)
-                            # get the info for the file
-                            file_info = get_file_info_tuple(
-                                filepath,
-                                pr.migration.user.name,
-                                conn
-                            )
-                            # get the size and calculate the
-                            fileinfos.append(file_info)
-            else:
-                # get the info for the file
+    # loop over the files or directories - copy full paths and other info
+    # about the file into a list
+    fileinfos = []
+    for fd in pr.migration.filelist:
+        # check whether it's a directory: walk if it is
+        if os.path.isdir(fd):
+            # create the file list of all the files and directories under
+            # the original directory
+            # don't follow symbolic links!
+            user_file_list = os.walk(fd, followlinks=False)
+            for root, dirs, files in user_file_list:
+                # files
+                for fl in files:
+                    # get the full path and append to the list
+                    filepath = os.path.join(root, fl)
+                    # get the info for the file
+                    file_info = get_file_info_tuple(
+                        filepath,
+                        pr.migration.user.name,
+                        conn
+                    )
+                    # append
+                    fileinfos.append(file_info)
+                # directories
+                for dl in dirs:
+                    filepath = os.path.join(root, fl)
+                    # get the info for the file
+                    file_info = get_file_info_tuple(
+                        filepath,
+                        pr.migration.user.name,
+                        conn
+                    )
+                    # append a directory
+                    if os.path.isdir((file_info.filepath)):
+                        fileinfos.append(file_info)
+                # root
                 file_info = get_file_info_tuple(
-                    fd,
+                    root,
                     pr.migration.user.name,
                     conn
                 )
-                # get the size and calculate the
-                fileinfos.append(file_info)
+                # append the root
+                if os.path.isdir(file_info.filepath):
+                    fileinfos.append(file_info)
+            # 1. change the owner of the directory to be root
+            # 2. change the read / write permissions to be user-only
+            subprocess.call(["/usr/bin/sudo", "/bin/chown", "-R", "root:root", fd])
+            subprocess.call(["/usr/bin/sudo", "/bin/chmod", "-R", "700", fd])
 
-        # sort the fileinfos based on size using attrgetter
-        # this will group all the small files together
-        # we will take files from the back, so set descending to True
-        fileinfos.sort(key=attrgetter('size'), reverse=True)
+        else:
+            # get the info for the file
+            file_info = get_file_info_tuple(
+                fd,
+                pr.migration.user.name,
+                conn
+            )
+            # append to the list of files
+            fileinfos.append(file_info)
+            # 1. change the owner of the file to be root
+            # 2. change the read / write permissions to be user-only
+            subprocess.call(["/usr/bin/sudo", "/bin/chown", "root:root", fd])
+            subprocess.call(["/usr/bin/sudo", "/bin/chmod", "700", fd])
 
-        # get the backend object minimum size
-        backend_object = get_backend_object(pr.migration.storage.get_name())
+    # sort the fileinfos based on size using attrgetter
+    # this will group all the small files together
+    # we will take files from the back, so set descending to True
+    fileinfos.sort(key=attrgetter('size'), reverse=True)
 
-        # keep adding files to MigrationArchives until there are none left
-        # (when current file < 0)
-        n_current_file = len(fileinfos) - 1
+    # get the backend object minimum size
+    backend_object = get_backend_object(pr.migration.storage.get_name())
 
-        while n_current_file >= 0:
-            # create a new MigrationArchive
-            mig_arc = MigrationArchive()
-            # assign the migration, copy from the MigrationRequest
-            mig_arc.migration = pr.migration
-            # save the migration archive
-            mig_arc.save()
+    # keep adding files to MigrationArchives until there are none left
+    # (when current file < 0)
+    n_current_file = len(fileinfos) - 1
 
-            # now create the files - while there are files left and the current
-            # archive size is less than the minimum object size for the backend
-            current_size = 0
-            while (n_current_file >= 0 and
-                    current_size < backend_object.minimum_object_size()):
-                # create the migration file using the fileinfo pointed to by
-                # n_current_file
-                mig_file = MigrationFile()
-                fileinfo = fileinfos[n_current_file]
-                # fill in the details
-                mig_file.path = fileinfo.filepath
-                mig_file.size = fileinfo.size
-                mig_file.digest = fileinfo.digest
-                mig_file.unix_user_id = fileinfo.unix_user_id
-                mig_file.unix_group_id = fileinfo.unix_group_id
-                mig_file.unix_permission = fileinfo.unix_permission
-                mig_file.archive = mig_arc
+    while n_current_file >= 0:
+        # create a new MigrationArchive
+        mig_arc = MigrationArchive()
+        # assign the migration, copy from the MigrationRequest
+        mig_arc.migration = pr.migration
+        # save the migration archive
+        mig_arc.save()
 
-                # add the size to the current archive size
-                current_size += fileinfos[n_current_file].size
-                # go to the next file (going backwards through a descending
-                # sorted list remember!)
-                n_current_file -= 1
-                # save the Migration File
-                mig_file.save()
-                logging.info("PUT: Added file: " + mig_file.path)
-        #
-        # # if it's on disk then:
-        # # 1. change the owner of the directory to be root
-        # # 2. change the read / write permissions to be user-only
-        # subprocess.call(["/usr/bin/sudo", "/bin/chown",
-        #                  "root:root", pr.migration.original_path])
-        # subprocess.call(["/usr/bin/sudo", "/bin/chmod",
-        #                  "700", pr.migration.original_path])
+        # now create the files - while there are files left and the current
+        # archive size is less than the minimum object size for the backend
+        current_size = 0
+        while (n_current_file >= 0 and
+                current_size < backend_object.minimum_object_size()):
+            # create the migration file using the fileinfo pointed to by
+            # n_current_file
+            mig_file = MigrationFile()
+            fileinfo = fileinfos[n_current_file]
+            # fill in the details
+            mig_file.path = fileinfo.filepath
+            mig_file.size = fileinfo.size
+            mig_file.digest = fileinfo.digest
+            mig_file.unix_user_id = fileinfo.unix_user_id
+            mig_file.unix_group_id = fileinfo.unix_group_id
+            mig_file.unix_permission = fileinfo.unix_permission
+            mig_file.archive = mig_arc
 
-        # set the migration stage to be PUT_PENDING
-        pr.migration.stage = Migration.PUT_PENDING
-        pr.migration.save()
+            # add the size to the current archive size
+            current_size += fileinfos[n_current_file].size
+            # go to the next file (going backwards through a descending
+            # sorted list remember!)
+            n_current_file -= 1
+            # save the Migration File
+            mig_file.save()
+            logging.info("PUT: Added file: " + mig_file.path)
+
+    # set the MigrationRequest stage to be PUT_PENDING and the
+    # Migration stage to be PUTTING
+    pr.stage = MigrationRequest.PUT_PENDING
+    pr.migration.stage = Migration.PUTTING
+    pr.migration.save()
+    pr.save()
 
 
-def lock_put_directories():
+def lock_put_filelists():
     """Lock the directories that are going to be put to external storage.
        Also build the MigrationFiles entries from walking the directories
        This is to ensure that the user doesn't write any more data to them
@@ -224,7 +251,7 @@ def lock_put_directories():
     put_reqs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
-        & Q(stage=MigrationRequest.ON_DISK)
+        & Q(stage=MigrationRequest.PUT_START)
     )
     # create the required ldap server pool, do this just once to
     # improve performance
@@ -245,7 +272,7 @@ def lock_get_directories():
     # get the list of GET requests
     get_reqs = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.GET)
-        & Q(stage=MigrationRequest.ON_STORAGE)
+        & Q(stage=MigrationRequest.GET_START)
     )
     # for each GET request get the Migration and determine if the type of the
     # Migration is ON_TAP
@@ -274,5 +301,5 @@ def run():
     """Entry point for the Django script run via ``./manage.py runscript``
     """
     setup_logging(__name__)
-    lock_put_directories()
+    lock_put_filelists()
     lock_get_directories()

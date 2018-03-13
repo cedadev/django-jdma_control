@@ -74,30 +74,51 @@ class Backend(object):
         """
         raise NotImplementedError
 
-    def get(self, conn, batch_id, user, workspace, target_dir):
+    def close_connection(self, conn):
+        """Close the connection to the backend"""
+        raise NotImplementedError
+
+    def create_download_batch(self, conn):
+        """Create a batch for download from the external storage and return the
+        batch id"""
+        raise NotImplementedError
+
+    def close_download_batch(self, conn, batch_id):
+        """Close the download batch on the external storage"""
+        raise NotImplementedError
+
+    def get(self, conn, batch_id, archive, target_dir):
         """Get the batch from the external storage and download to a
         target_dir
         """
         raise NotImplementedError
 
-    def create_batch(self, conn, user, workspace):
-        """Create a batch on the external storage and return the batch id"""
+    def create_upload_batch(self, conn):
+        """Create a batch for upload to the external storage and return the
+        batch id"""
         raise NotImplementedError
 
-    def close_batch(self, conn, batch_id, user, workspace):
-        """Close the batch on the external storage"""
+    def close_upload_batch(self, conn, batch_id):
+        """Close the upload batch on the external storage"""
         raise NotImplementedError
 
-    def put(self, conn, batch_id, archive, user, workspace):
+    def put(self, conn, batch_id, archive):
         """Put a single tarred archive of files into a batch (created using
         create_batch function) on the external storage
         """
         raise NotImplementedError
 
     # permissions / quota
-    def user_has_put_permission(self, conn, username, workspace):
+    def user_has_put_permission(self, conn):
         """Does the user have permission to write to the workspace
-        on the storage device
+        on the storage device?
+        """
+        raise NotImplementedError
+
+
+    def _user_has_put_permission(self, username, workspace):
+        """Does the user have permission to write to the workspace
+        on the storage device?  LDAP version.
         """
         ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY,
                                   settings.JDMA_LDAP_REPLICAS)
@@ -120,9 +141,15 @@ class Backend(object):
         return True
 
 
-    def user_has_get_permission(self, conn, migration, username, workspace):
+    def user_has_get_permission(self, conn):
         """Does the user have permission to get the migration request from the
-        storage device. This is a base example, can be overridden and also just
+        storage device?"""
+        raise NotImplementedError
+
+
+    def _user_has_get_permission(self, username, workspace):
+        """Does the user have permission to get a migration request from the
+        storage device? This is a base example, can be overridden and also just
         called on its own.
         """
         # create the LDAP server pool needed in both GET and PUT requests
@@ -147,7 +174,11 @@ class Backend(object):
 
         return True
 
-    def user_has_put_quota(self, conn, filelist, username, workspace):
+    def user_has_put_quota(self, conn, filelist):
+        """Get the remaining quota for the user in the workspace"""
+        raise NotImplementedError
+
+    def _user_has_put_quota(self, conn, filelist, username, workspace):
         """Get the remaining quota for the user in the workspace"""
         return False
 

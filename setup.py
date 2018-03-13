@@ -17,7 +17,7 @@ setup(
         'django-sizefield',
         'django-extensions',
         'django-multiselectfield',
-        'psycopg2',
+        'psycopg2-binary',
         'packaging',
         'pyparsing',
         'pytz',

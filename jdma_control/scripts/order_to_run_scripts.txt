@@ -7,10 +7,12 @@ can be contained in the MigrationRequest.  This is because, even though many
 GET MigrationRequests can point to a single Migration, for PUT MigrationRequests
 there is a strict 1:1 mapping between the Migration and the MigrationRequest
 
-Migrations now have only three states:
+Migrations now have only four states:
 
 1. ON_DISK      (the filelist in the migration has been scheduled for upload but
                  not started)
+2. PUTTING      (the filelist in the migration is being put on the external
+                 storage)
 2. ON_STORAGE   (the files in the filelist have been copied to the external
                  storage and deleted from the original storage)
 3. FAILED       (something went wrong - record the failure reason in the
@@ -41,6 +43,8 @@ For GET requests
 15. GET_TIDY
 16. GET_COMPLETED
 
+17. FAILED
+
 There now follows a description of which operations are carried out when the
 machine is in a particular start, which of the daemons carries out these
 operations and the transition to the next stage in the state machine.
@@ -59,6 +63,7 @@ tasks:
     MigrationArchive size is less than the backends minimum object size
 transition:
     PUT_START->PUT_PENDING
+    ON_DISK->PUTTING
 
 2.  PUT_PENDING
 ===============
@@ -71,7 +76,7 @@ transition:
 
 3.  PUT_PACKING
 ===============
-script: jdma_packing -> (new script)
+script: jdma_pack -> (new script)
 tasks:
     create the staging directory
     create the tarfile MigrationArchives in the staging directory and add the
@@ -87,6 +92,12 @@ script: jdma_transfer ->
 tasks:
     upload the MigrationArchives to the external storage backend
     close the upload batch on the external storage backend
+
+4a. PUTTING
+===========
+script: jdma_monitor ->
+tasks:
+    poll for completion of upload
 transition:
     PUTTING->VERIFY_PENDING
 
@@ -105,6 +116,14 @@ script: jdma_transfer ->
 tasks:
     download the MigrationArchives to the temporary verification directory
 transition:
+    none (next transition handled in jdma_monitor)
+
+6a. VERIFY_GETTING
+==================
+script: jdma_monitor ->
+tasks:
+    poll for completion of the downloads
+transition:
     VERIFY_GETTING->VERIFYING
 
 7.  VERIFYING
@@ -113,7 +132,6 @@ script: jdma_verify ->
 tasks:
     verify the MigrationArchive files - make sure that the digest of the
     downloaded archive matches that of the digest calculated in PUT_PACKING
-    send the notification email that the Migration has completed successfully
     set the Migration to ON_STORAGE
     set last_archive to 0
 transition:
@@ -125,6 +143,8 @@ script: jdma_tidy ->
 tasks:
     delete the staged archive tarfiles (created in PUT_PACKING)
     delete the verified downloaded archive tarfiles (create in VERIFY_GETTING)
+    delete the original files if request_type == MIGRATE or
+      restore permissions on original files if request_type == PUT
 transition:
     PUT_TIDY->PUT_COMPLETED
 
@@ -133,10 +153,12 @@ transition:
 script: jdma_tidy ->
 tasks:
     delete the MigrationRequest
+    send the notification email that the Migration has completed successfully
     subtract the uploaded amount (sum of MigrationArchives) from the
       groupworkspace quota
 transition:
     none, the MigrationRequest has been deleted
+    PUTTING->ON_STORAGE
 
 10. GET_START
 =============
@@ -162,6 +184,12 @@ script: jdma_transfer ->
 tasks:
     download the MigrationArchives to the download staging directory
     set last_archive to 0
+
+12a.GETTING
+===========
+script: jdma_monitor ->
+tasks:
+    poll for completion of download
 transition:
     GETTING->GET_UNPACK
 
@@ -169,9 +197,10 @@ transition:
 ==============
 script: jdma_packing -> (new script)
 tasks:
+    check the digest of the archive matches that in the database
     unpack the tar archives from the download staging directory to the target
       directory
-      set last_archive to 0
+    set last_archive to 0
 transition:
     GET_UNPACK->GET_RESTORE
 
@@ -196,13 +225,17 @@ transition:
 script: jdma_tidy ->
 tasks:
     delete the MigrationRequest
+    send the email notification informing the user that the Migration has been
+    downloaded successfully
 transition:
     none, the MigrationRequest has been deleted
 
-In development / test mode:
+--------------------------------------------------------------------------------
+To test the Migrations, in development / test mode:
 
 First become root: `sudo su`
-Then activate the virtual env by invoking: `source /home/vagrant/JDMA/venv/bin/activate`
+Then activate the virtual env by invoking:
+`source /home/vagrant/JDMA/venv/bin/activate`
 
 Then navigate to the JDMA source directory: `cd /Coding/django-jdma_control`
 
@@ -210,23 +243,34 @@ Then run the scripts using ./manage.py runscript <script name>
 
 In the test mode run the scripts in this order:
 
-(To put data)
-                    Migration.stage
-1. jdma_lock        ON_DISK->PUT_PENDING
-2. jdma_transfer    PUT_PENDING->PUTTING
-3. jdma_monitor     PUTTING->VERIFY_PENDING
-4. jdma_transfer    VERIFY_PENDING->VERIFY_GETTING
-5. jdma_monitor     VERIFY_GETTING->VERIFYING
-6. jdma_verify      VERIFYING->ON_STORAGE
-7. jdma_tidy        remove files, intermediary directories (verify) and the
-                    original_path, delete MigrationRequest
-
-(To get data)
+(To PUT or MIGRATE data)
+(should we have a JDMA transition daemon?)
                     MigrationRequest.stage
-1. jdma_lock        ON_STORAGE->GET_PENDING
-2. jdma_transfer    GET_PENDING->GETTING
-3. jdma_monitor     GETTING->ON_DISK
-4. jdma_tidy        set permissions and owner back on downloaded directory,
-                    delete MigrationRequest
+                    ----------------------
+1.  jdma_lock       PUT_START->PUT_PENDING
+2.  jdma_transfer   PUT_PENDING->PUT_PACK
+3.  jdma_pack       PUT_PACK->PUTTING
+4.  jdma_transfer   (no state transition)
+5.  jdma_monitor    PUTTING->VERIFY_PENDING
+6.  jdma_transfer   VERIFY_PENDING->VERIFY_GETTING
+7.  jdma_transfer   (no state transition)
+8.  jdma_monitor    VERIFY_GETTING->VERIFYING
+9.  jdma_verify     VERIFYING->PUT_TIDY
+10. jdma_tidy       PUT_TIDY->PUT_COMPLETED
+11. jdma_tidy       PUT_COMPLETED->deleted
+
+
+(To GET data)
+                    MigrationRequest.stage
+                    -----------------------
+1.  jdma_lock        GET_START->GET_PENDING
+2.  jdma_transfer    GET_PENDING->GETTING
+3.  jdma_transfer    (no state transition)
+4.  jdma_monitor     GETTING->GET_UNPACK
+5   jdma_pack        GET_UNPACK->GET_RESTORE
+6.  jdma_transfer    GET_RESTORE->GET_TIDY
+7.  jdma_tidy        GET_TIDY->GET_COMPLETED
+8.  jdma_tidy        GET_COMPLETED->deleted
+
 
 In the deployment mode the scripts will be run by cron

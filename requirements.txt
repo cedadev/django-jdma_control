@@ -4,7 +4,7 @@ django-extensions==1.9.9
 django-multiselectfield==0.1.8
 django-sizefield==0.9.1
 packaging==16.8
-psycopg2==2.7.4
+psycopg2-binary==2.7.4
 pyparsing==2.2.0
 pytz==2018.3
 six==1.11.0

@@ -394,14 +394,6 @@ class MigrationRequestView(View):
                               "name": keyargs["user__name"]}
                 return HttpError(error_data)
 
-            # determine the stage
-            if req.request_type == MigrationRequest.PUT:
-                migration_stage = req.migration.stage
-            elif req.request_type == MigrationRequest.MIGRATE:
-                migration_stage = req.migration.stage
-            elif req.request_type == MigrationRequest.GET:
-                migration_stage = req.stage + 10      # plus 10 to indicate GET
-
             # full details - these are all the required fields
             data = {"request_id": req.id, "user": req.user.name,
                     "request_type": req.request_type,
@@ -411,7 +403,7 @@ class MigrationRequestView(View):
                     "storage": StorageQuota.get_storage_name(
                         req.migration.storage.storage
                     ),
-                    "stage": migration_stage}
+                    "stage": req.stage}
             if req.date:
                 data["date"] = req.date.isoformat()
             # add the failure reason if failed
@@ -432,14 +424,6 @@ class MigrationRequestView(View):
             # loop over the requests and add to the data at the end
             requests = []
             for r in reqs:
-                # determine the stage
-                if r.request_type == MigrationRequest.PUT:
-                    migration_stage = r.migration.stage
-                elif r.request_type == MigrationRequest.MIGRATE:
-                    migration_stage = r.migration.stage
-                elif r.request_type == MigrationRequest.GET:
-                    migration_stage = r.stage + 10
-
                 req_data = {"request_id": r.pk, "user": r.user.name,
                             "request_type": r.request_type,
                             "migration_id": r.migration.pk,
@@ -448,7 +432,7 @@ class MigrationRequestView(View):
                             "storage": StorageQuota.get_storage_name(
                                 r.migration.storage.storage
                             ),
-                            "stage": migration_stage}
+                            "stage": r.stage}
                 if r.date:
                     req_data["date"] = r.date.isoformat()
                 requests.append(req_data)
@@ -594,12 +578,7 @@ class MigrationRequestView(View):
             )
             #   3b. check that the migration belongs to the user, or has group
             #   or universal permission
-            if not JDMA_BACKEND_OBJECT.user_has_get_permission(
-                conn,
-                mig,
-                user.name,
-                mig.workspace.workspace,
-            ):
+            if not JDMA_BACKEND_OBJECT.user_has_get_permission(conn):
                 error_data["error"] = (
                     "User {} does not have permission to request the batch"
                 ).format(user.name)
@@ -629,32 +608,46 @@ class MigrationRequestView(View):
             #   6. check if this is a duplicate
             dup_req = MigrationRequest.objects.filter(
                 migration=mig,
-                target_path=target_path
+                target_path=target_path,
+                pk=mig.pk
             )
             if len(dup_req) != 0:
-                error_data["error"] = "Duplicate GET request made: Batch ID: {}, Target path: {}".format(mig.external_id, target_path)
+                error_data["error"] = (
+                    "Duplicate GET request made: Batch ID: {}, Target path: {}"
+                ).format(mig.external_id, target_path)
                 return HttpError(error_data, status=403)
 
             #   7. check the target path exists
             base_path = os.path.dirname(target_path)
             if not os.path.exists(base_path):
-                error_data["error"] = "Parent of target path " + target_path + " does not exist: " + str(base_path)
+                error_data["error"] = (
+                    "Parent of target path {}" + target_path + " does not"
+                    "exist: {}"
+                ).format(target_path, + str(base_path))
                 return HttpError(error_data, status=403)
 
             #   8. check the user has permission to write to the directory
             if not user_has_write_permission(base_path, data["name"]):
-                error_data["error"] = "User " + data["name"] + " does not have write permission to the directory: " + str(target_path)
+                error_data["error"] = (
+                    "User {} does not have write permission to the directory: {}"
+                ).format(data["name"], str(target_path))
                 return HttpError(error_data, status=403)
 
             #   9. Check there is enough space on disk
             retrieval_size = 0
-            if not user_has_sufficient_diskspace(base_path, data["name"], retrieval_size): # implement this function
-                error_data["error"] = "Insufficient diskspace for the retrieval (GET) " + str(target_path)
+            if not user_has_sufficient_diskspace(
+                base_path, data["name"],
+                retrieval_size
+            ): # implement this function
+                error_data["error"] = (
+                    "Insufficient diskspace for the retrieval (GET) {}"
+                ).format(str(target_path))
                 return HttpError(error_data, status=403)
 
-            # All the checks have been passed so we can now add the request to the JDMA database
+            # All the checks have been passed so we can now add the request to
+            # the JDMA database
             migration_request.target_path = target_path
-            migration_request.stage = MigrationRequest.ON_STORAGE
+            migration_request.stage = MigrationRequest.GET_START
             # credentials - we encrypt these using AES EAX mode
             key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
             migration_request.credentials = AES_tools.AES_encrypt_dict(
@@ -817,9 +810,7 @@ class MigrationRequestView(View):
             )
 
             # 4. check group workspace permission
-            if not JDMA_BACKEND_OBJECT.user_has_put_permission(
-                conn, data["name"], data["workspace"],
-            ):
+            if not JDMA_BACKEND_OBJECT.user_has_put_permission(conn):
                 error_data["error"] = (
                     "User {} does not have write permissions or the workspace {}"
                     " does not exist for {}"
@@ -834,9 +825,7 @@ class MigrationRequestView(View):
             if "filelist" in data:
                 put_quota = JDMA_BACKEND_OBJECT.user_has_put_quota(
                     conn,
-                    data["filelist"],
-                    data["name"],
-                    data["workspace"],
+                    data["filelist"]
                 )
             else:
                 put_quota = False
@@ -875,8 +864,8 @@ class MigrationRequestView(View):
             # associate the migration_request with the migration and save to
             # the database
             migration_request.migration = migration
-            # set the migration request to be ON_DISK as that makes sense
-            migration_request.stage = MigrationRequest.ON_DISK
+            # set the migration request to be PUT_START
+            migration_request.stage = MigrationRequest.PUT_START
             # credentials - we encrypt these using AES EAX mode
             key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
             migration_request.credentials = AES_tools.AES_encrypt_dict(
