@@ -134,30 +134,7 @@ class Migration(models.Model):
     via the JASMIN data migration app (JDMA).
     Users register directories from a group workspace (GWS) with the JDMA
     client via a HTTP API.
-    :var models.IntegerField stage: The stage that the directory is at, one of:
-
-       - ** ONDISK (0) The directory is on disk and is writable by the user
-
-       - ** PUT_PENDING (1) The directory has been locked and the request is
-       queued to transfer ** TO ** storage
-
-       - ** PUTTING (2) The directory is currently being transferred ** TO **
-       storage
-
-       - ** VERIFY_PENDING (3) The directory is queued for VERIFYING
-
-       - ** VERIFYING (4) The files are being fetched back from storage and
-       compared to their SHA256 digests
-
-       - ** ONSTORAGE (5) The directory is on storage
-
-       - ** GET_PENDING (6) The directory has been locked and the request is
-       queued to transfer ** FROM ** storage
-
-       - ** GETTING (7) The directory is currently being transferred ** FROM **
-       storage
-
-       - ** FAILED (8)
+    :var models.IntegerField stage: The stage that the directory is at.
     """
 
     # default backend
@@ -172,30 +149,20 @@ class Migration(models.Model):
                                   help_text="Workspace used for this request",
                                   on_delete=models.CASCADE)
 
-    # stages for storage transfer - to storage.  There is a strict one to one
-    # mapping for the data->storage record, and therefore a one to one mapping
-    # for the data and the PUT migration.
-    # For the GET migration, there may be many requests for one migration and
-    # so the GET stages are in the migration request model
+    # states of the Migration.
+    # There are now only three states - ON_DISK, ON_STORAGE and FAILED
+    # The Migration is ON_DISK until it has been fully uploaded to the external
+    #  storage and deleted.
     ON_DISK = 0
-    PUT_PENDING = 1
-    PUTTING = 2
-    VERIFY_PENDING = 3
-    VERIFY_GETTING = 4
-    VERIFYING = 5
-    ON_STORAGE = 6
-    FAILED = 7
+    PUTTING = 1
+    ON_STORAGE = 2
+    FAILED = 3
 
     STAGE_CHOICES = ((ON_DISK, 'ON_DISK'),
-                     (PUT_PENDING, 'PUT_PENDING'),
                      (PUTTING, 'PUTTING'),
-                     (VERIFY_PENDING, 'VERIFY_PENDING'),
-                     (VERIFY_GETTING, 'VERIFY_GETTING'),
-                     (VERIFYING, 'VERIFYING'),
                      (ON_STORAGE, 'ON_STORAGE'),
                      (FAILED, 'FAILED'))
-    STAGE_LIST = ['ON_DISK', 'PUT_PENDING', 'PUTTING', 'VERIFY_PENDING',
-                  'VERIFY_GETTING', 'VERIFYING', 'ON_STORAGE', 'FAILED']
+    STAGE_LIST = ['ON_DISK', 'PUTTING', 'ON_STORAGE', 'FAILED']
     stage = models.IntegerField(choices=STAGE_CHOICES, default=FAILED)
 
     # batch id for external storage
@@ -263,7 +230,7 @@ class Migration(models.Model):
 
 @python_2_unicode_compatible
 class MigrationRequest(models.Model):
-    """A request to migrate (PUT) or retrieve (GET) a directory via the JASMIN
+    """A request to upload (PUT) or retrieve (GET) a directory via the JASMIN
     data migration app (JDMA).
     """
 
@@ -280,29 +247,68 @@ class MigrationRequest(models.Model):
                    "MIGRATE": MIGRATE}
     request_type = models.IntegerField(choices=__REQUEST_CHOICES)
 
-    ON_STORAGE = 0
-    GET_PENDING = 1
-    GETTING = 2
-    ON_DISK = 3
-    FAILED = 4
-    PUTTING = 5
+    # new state machine for GET / PUT / MIGRATE
+    # all transactions occur through the MigrationRequest, rather than a hybrid
+    # of the Migration and MigrationRequest
+    PUT_START=0
+    PUT_PENDING=1
+    PUT_PACKING=2
+    PUTTING=3
+    VERIFY_PENDING=4
+    VERIFY_GETTING=5
+    VERIFYING=6
+    PUT_TIDY=7
+    PUT_COMPLETED=8
 
-    REQ_STAGE_CHOICES = ((ON_STORAGE, 'ON_STORAGE'),
+    GET_START=100
+    GET_PENDING=101
+    GETTING=102
+    GET_UNPACKING=103
+    GET_RESTORE=104
+    GET_TIDY=105
+    GET_COMPLETED=106
+
+    FAILED=200
+
+    REQ_STAGE_CHOICES = ((PUT_START, 'PUT_START'),
+                         (PUT_PENDING, 'PUT_PENDING'),
+                         (PUT_PACKING, 'PUT_PACKING'),
                          (PUTTING, 'PUTTING'),
+                         (VERIFY_PENDING, 'VERIFY_PENDING'),
+                         (VERIFY_GETTING, 'VERIFY_GETTING'),
+                         (VERIFYING, 'VERIFYING'),
+                         (PUT_TIDY, 'PUT_TIDY'),
+                         (PUT_COMPLETED, 'PUT_COMPLETED'),
+                         (GET_START, 'GET_START'),
                          (GET_PENDING, 'GET_PENDING'),
                          (GETTING, 'GETTING'),
-                         (ON_DISK, 'ON_DISK'),
+                         (GET_UNPACKING, 'GET_UNPACKING'),
+                         (GET_RESTORE, 'GET_RESTORE'),
+                         (GET_TIDY, 'GET_TIDY'),
+                         (GET_COMPLETED, 'GET_COMPLETED'),
                          (FAILED, 'FAILED'))
 
-    REQ_STAGE_LIST = ['ON_STORAGE',
+    REQ_STAGE_LIST = ['PUT_START',
+                      'PUT_PENDING',
+                      'PUT_PACKING',
+                      'PUTTING',
+                      'VERIFY_PENDING',
+                      'VERIFY_GETTING',
+                      'VERIFYING',
+                      'PUT_TIDY',
+                      'PUT_COMPLETED',
+                      'GET_START',
                       'GET_PENDING',
                       'GETTING',
-                      'ON_DISK',
+                      'GET_UNPACKING',
+                      'GET_RESTORE',
+                      'GET_TIDY',
+                      'GET_COMPLETED',
                       'FAILED']
 
     stage = models.IntegerField(
         choices=REQ_STAGE_CHOICES,
-        default=ON_STORAGE,
+        default=FAILED,
         help_text="Current upload / download stage"
     )
 
@@ -385,6 +391,13 @@ class MigrationArchive(models.Model):
         help_text="Migration that this Archive belongs to"
     )
 
+    # size in bytes
+    size = FileSizeField(
+        null=False,
+        default=0,
+        help_text="size of file in bytes"
+    )
+
     def name(self):
         return "Archive " + str(self.pk)
     name.short_description = "archive_name"
@@ -402,6 +415,10 @@ class MigrationArchive(models.Model):
             fname = q_set[0].path
             return str(len(q_set)) + " files. First file: " + fname
     first_file.short_description = "first_file"
+
+    def formatted_size(self):
+        return filesizeformat(self.size)
+    formatted_size.short_description = "size"
 
     def __str__(self):
         """Return a string representation"""
@@ -462,7 +479,7 @@ class MigrationFile(models.Model):
 
     def formatted_size(self):
         return filesizeformat(self.size)
-    formatted_size.short_description = "formatted_size"
+    formatted_size.short_description = "size"
 
     def __str__(self):
         return self.path

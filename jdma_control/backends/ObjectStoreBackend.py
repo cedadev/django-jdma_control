@@ -12,9 +12,102 @@
 import os
 
 import boto3
+from django.db.models import Q
 
 from jdma_control.backends.Backend import Backend
 from jdma_control.backends import ObjectStoreSettings as OS_Settings
+from jdma_control.backends import AES_tools
+import jdma_site.settings as settings
+
+def get_completed_puts():
+    """Get all the completed puts for the ObjectStore"""
+    # avoiding a circular dependency
+    from jdma_control.models import MigrationRequest, Migration, StorageQuota
+    # get the storage id
+    storage_id = StorageQuota.get_storage_index("objectstore")
+    # get the decrypt key
+    key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
+
+    # list of completed PUTs to return
+    completed_PUTs = []
+    # now loop over the PUT requests
+    put_reqs = MigrationRequest.objects.filter(
+        (Q(request_type=MigrationRequest.PUT))
+        & Q(stage=MigrationRequest.PUTTING)
+        & Q(migration__stage=Migration.PUTTING)
+        & Q(migration__storage__storage=storage_id)
+    )
+    for pr in put_reqs:
+        # decrypt the credentials
+        credentials = AES_tools.AES_decrypt_dict(key, pr.credentials)
+        try:
+            # create a connection to the object store
+            s3c = boto3.client("s3", endpoint_url=OS_Settings.S3_ENDPOINT,
+                               aws_access_key_id=credentials['access_key'],
+                               aws_secret_access_key=credentials['secret_key'])
+            # loop over each archive in the migration
+            archive_set = pr.migration.migrationarchive_set.order_by('pk')
+            # counter for number of uploaded archives
+            n_up_arch = 0
+            for archive in archive_set:
+                # form the object name
+                object_name = archive.get_id() + ".tar"
+                # use head_object to check if the object is written
+                if s3c.head_object(Bucket=pr.migration.external_id,
+                                   Key=object_name):
+                    n_up_arch += 1
+            if n_up_arch == len(archive_set):
+                completed_PUTs.append(pr.migration.external_id)
+        except Exception as e:
+            raise Exception(e)
+
+    return completed_PUTs
+
+
+def get_completed_gets():
+    # avoiding a circular dependency
+    from jdma_control.models import MigrationRequest, StorageQuota
+    # get the storage id
+    storage_id = StorageQuota.get_storage_index("objectstore")
+
+    # list of completed GETs to return
+    completed_GETs = []
+    # now loop over the GET requests
+    get_reqs = MigrationRequest.objects.filter(
+        (Q(stage=MigrationRequest.GETTING)
+        | Q(stage=MigrationRequest.VERIFY_GETTING))
+        & Q(migration__storage__storage=storage_id)
+    )
+    #
+
+    for gr in get_reqs:
+        # get the name of the target directory (same for each archive in a
+        # migration)
+        verify_dir = os.path.join(
+            OS_Settings.VERIFY_DIR,
+            "verify_{}".format(gr.migration.external_id)
+        )
+        n_completed_archives = 0
+        # loop over each archive in the migration
+        archive_set = gr.migration.migrationarchive_set.order_by('pk')
+        # just need to see if the archive has been downloaded to the file system
+        # we know this when the file is present and the file size is equal to
+        # that stored in the database
+        for archive in archive_set:
+            # form the filepath
+            archive_name = archive.get_id() + ".tar"
+            tar_file_path = os.path.join(verify_dir, archive_name)
+            # check for existance first
+            if os.path.exists(tar_file_path):
+                # now check for size
+                size = os.stat(tar_file_path).st_size
+                if size == archive.size:
+                    n_completed_archives += 1
+        # if number completed is equal to number in archive set then the
+        # transfer has completed
+        if n_completed_archives == len(archive_set):
+            completed_GETs.append(gr.migration.external_id)
+    return completed_GETs
 
 
 class ObjectStoreBackend(Backend):
@@ -40,8 +133,11 @@ class ObjectStoreBackend(Backend):
 
     def monitor(self):
         """Determine which batches have completed."""
-        completed_PUTs = ["2"]
-        completed_GETs = []
+        try:
+            completed_PUTs = get_completed_puts()
+            completed_GETs = get_completed_gets()
+        except Exception as e:
+            raise Exception(e)
         return completed_PUTs, completed_GETs
 
     def create_connection(self, user, workspace, credentials):
@@ -49,9 +145,24 @@ class ObjectStoreBackend(Backend):
         s3c = boto3.client("s3", endpoint_url=OS_Settings.S3_ENDPOINT,
                            aws_access_key_id=credentials['access_key'],
                            aws_secret_access_key=credentials['secret_key'])
+        s3c.jdma_user = user
+        s3c.jdma_workspace = workspace
         return s3c
 
-    def get(self, conn, batch_id, archive, user, workspace, target_dir):
+    def close_connection(self, conn):
+        """Close the connection to the backend.  Do nothing for the object store
+        """
+        return
+
+    def create_download_batch(self, conn):
+        """Do nothing for object store."""
+        return
+
+    def close_download_batch(self, conn):
+        """Do nothing for object store."""
+        return
+
+    def get(self, conn, batch_id, archive, target_dir):
         """Download a batch of files from the Object Store to a target
         directory.
         """
@@ -60,12 +171,12 @@ class ObjectStoreBackend(Backend):
         download_file_path = os.path.join(target_dir, object_name)
         conn.download_file(batch_id, object_name, download_file_path)
 
-    def create_batch(self, conn, user, workspace):
+    def create_upload_batch(self, conn):
         """Create a batch on the object store and return the batch id.
         For the object store the batch id is the groupworkspace name appended
         with the next batch number for that groupworkspace.
         """
-        gws_bucket_prefix = "gws-" + workspace + "-"
+        gws_bucket_prefix = "gws-" + conn.jdma_workspace + "-"
         # list all the buckets and filter those that contain the bucket prefix
         # find the highest number suffix
         try:
@@ -97,25 +208,25 @@ class ObjectStoreBackend(Backend):
 
         return batch_id
 
-    def close_batch(self, conn, batch_id, user, workspace):
+    def close_upload_batch(self, conn, batch_id):
         """Close the batch on the external storage.
            Not needed for object store"""
         return
 
-    def put(self, conn, batch_id, archive, user, workspace):
+    def put(self, conn, batch_id, archive):
         """Put a staged archive (with path archive) onto the Object Store"""
         # get the last part of the filepath
         object_name = os.path.basename(archive)
         conn.upload_file(archive, batch_id, object_name)
 
-    def user_has_put_permission(self, conn, username, workspace):
+    def user_has_put_permission(self, conn):
         """Check whether the user has permission (via their access_key and
         secret_key) to access the object store, and whether they have
         permission from the groupworkspace
         """
         # groupworkspace permission
-        gws_permission = Backend.user_has_put_permission(
-            self, conn, username, workspace
+        gws_permission = Backend._user_has_put_permission(
+            self, conn.jdma_user, conn.jdma_workspace.workspace
         )
 
         # to validate the credentials we have to do some operation, as just
@@ -127,13 +238,13 @@ class ObjectStoreBackend(Backend):
             s3_permission = False
         return gws_permission & s3_permission
 
-    def user_has_get_permission(self, conn, migration, username, workspace):
+    def user_has_get_permission(self, conn):
         """Check whether the user has permission (via their access_key and
         secret_key) to access the object store, and whether they have
         permission from the groupworkspace
         """
-        gws_permission = Backend.user_has_get_permission(
-            self, conn, migration, username, workspace
+        gws_permission = Backend._user_has_get_permission(
+            self, conn.jdma_user, conn.jdma_workspace.workspace
         )
 
         # to validate the credentials we have to do some operation, as just
@@ -145,7 +256,7 @@ class ObjectStoreBackend(Backend):
             s3_permission = False
         return gws_permission & s3_permission
 
-    def user_has_put_quota(self, conn, filelist, user, workspace):
+    def user_has_put_quota(self, conn, filelist):
         """Get the remaining quota for the user in the workspace.
         How can we do this in Object Store backend?
         """

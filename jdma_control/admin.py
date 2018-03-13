@@ -43,7 +43,7 @@ admin.site.register(Migration, MigrationAdmin)
 class MigrationRequestAdmin(admin.ModelAdmin):
     save_on_top = True
     list_display = ('pk', 'user', 'request_type', 'stage', 'date', 'migration')
-    list_filter = ('request_type', 'date',)
+    list_filter = ('request_type', 'date', 'stage',)
 
     fields = ('user', 'request_type', 'stage', 'date', 'migration',
               'target_path', 'credentials', 'last_archive', 'failure_reason')
@@ -85,9 +85,9 @@ class MigrationFileInline(admin.TabularInline):
 
 class MigrationArchiveAdmin(admin.ModelAdmin):
     save_on_top = True
-    list_display = ('pk', 'migration', 'digest')
-    fields = ('link_to_migration', 'digest')
-    readonly_fields = ('link_to_migration',)
+    list_display = ('pk', 'migration', 'formatted_size', 'digest')
+    fields = ('link_to_migration', 'formatted_size', 'digest')
+    readonly_fields = ('link_to_migration', 'formatted_size', 'digest')
     search_fields = ('migration.workspace',)
     inlines = [MigrationFileInline]
 

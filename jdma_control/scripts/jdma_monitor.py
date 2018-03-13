@@ -9,86 +9,13 @@
 """
 
 import logging
-import subprocess
 
-from django.core.mail import send_mail
 from django.db.models import Q
 
-import jdma_site.settings as settings
-from jdma_control.models import Migration, MigrationRequest
-from jdma_control.scripts.jdma_lock import setup_logging
-from jdma_control.scripts.jdma_verify import get_permissions_string
-
-from jasmin_ldap.core import *
-from jasmin_ldap.query import *
-
 import jdma_control.backends
-
-def send_get_notification_email(get_req, backend_object):
-    """Send an email to the user to notify them that their batch upload has been completed
-     var jdma_control.models.User user: user to send notification email to
-    """
-    user = get_req.user
-
-    if not user.notify:
-        return
-
-    # to address is notify_on_first
-    toaddrs = [user.email]
-    # from address is just a dummy address
-    fromaddr = "support@ceda.ac.uk"
-
-    # subject
-    subject = (
-        "[JDMA] - Notification of batch download from {}"
-    ).format(backend_object.get_name())
-
-    msg = (
-        "GET request has succesfully completed downloading from external "
-        "storage: {}\n"
-    ).format(backend_object.get_name())
-    msg += (
-        "    Request id\t\t: {}\n"
-    ).format(str(get_req.pk))
-    msg += (
-        "    Stage\t\t\t: {}\n"
-    ).format(MigrationRequest.REQ_STAGE_LIST[get_req.stage])
-    msg += (
-        "    Date\t\t\t: {}\n"
-    ).format(get_req.date.isoformat()[0:16].replace("T"," "))
-    msg += (
-        "    Target path\t\t: {}\n"
-    ).format(get_req.target_path)
-    msg += "\n"
-    msg += "------------------------------------------------"
-    msg += "\n"
-    msg += "The details of the downloaded batch are:\n"
-    msg += (
-        "    Ex. storage\t\t: {}\n"
-    ).format(str(backend_object.get_id()))
-    msg += (
-        "    Batch id\t\t: {}\n"
-    ).format(str(get_req.migration.pk))
-    msg += (
-        "    Workspace\t\t: {}\n"
-    ).format(get_req.migration.workspace)
-    msg += (
-        "    Label\t\t\t: {}\n"
-    ).format(get_req.migration.label)
-    msg += (
-        "    Date\t\t\t: {}\n"
-    ).format(get_req.migration.registered_date.isoformat()[0:16].replace("T"," "))
-    msg += (
-        "    Stage\t\t\t: {}\n"
-    ).format(Migration.STAGE_LIST[get_req.migration.stage])
-    # we should have at least one file in the filelist here
-    msg += (
-        "    Filelist\t: {}\n"
-    ).format(get_req.migration.formatted_filelist()[0] + "...")
-    msg += (
-        "    External batch id\t\t: {}\n"
-    ).format(get_req.migration.external_id)
-    send_mail(subject, msg, fromaddr, toaddrs, fail_silently=False)
+import jdma_site.settings as settings
+from jdma_control.models import Migration, MigrationRequest, StorageQuota
+from jdma_control.scripts.jdma_lock import setup_logging
 
 
 def monitor_put(completed_PUTs, backend_object):
@@ -99,21 +26,21 @@ def monitor_put(completed_PUTs, backend_object):
     put_reqs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
-        & Q(migration__shade=Migration.PUTTING)
+        & Q(stage=MigrationRequest.PUTTING)
+        & Q(migration__stage=Migration.PUTTING)
         & Q(migration__storage__storage=storage_id)
     )
     for pr in put_reqs:
         # check whether it's in the completed_PUTs
         if pr.migration.external_id in completed_PUTs:
             # if it is then migrate to VERIFY_PENDING
-            pr.migration.stage = Migration.VERIFY_PENDING
-            pr.migration.save()
-            logging.info(
-                "Transition: batch ID: {} PUTTING->VERIFY_PENDING"
-            ).format(pr.migration.external_id))
+            pr.stage = MigrationRequest.VERIFY_PENDING
             # reset the last_archive - needed for verify_get
             pr.last_archive = 0
             pr.save()
+            logging.info((
+                "Transition: batch ID: {} PUTTING->VERIFY_PENDING"
+            ).format(pr.migration.external_id))
 
 
 def monitor_get(completed_GETs, backend_object):
@@ -123,7 +50,7 @@ def monitor_get(completed_GETs, backend_object):
     get_reqs = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.GET)
         & Q(stage=MigrationRequest.GETTING)
-        & Q(migration__storage__storage=storage_id=storage_id)
+        & Q(migration__storage__storage=storage_id)
     )
 
     for gr in get_reqs:
@@ -139,7 +66,7 @@ def monitor_get(completed_GETs, backend_object):
             gr.save()
             logging.info(
                 "Transition: request ID: {} GETTING->ON_DISK"
-            ).format(gr.pk))
+            ).format(gr.pk)
 
 
 def monitor_verify(completed_GETs, backend_object):
@@ -149,8 +76,8 @@ def monitor_verify(completed_GETs, backend_object):
     verify_reqs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
-        & Q(migration_stage=Migration.VERIFY_GETTING)
-        & Q(migration_storage_storage=storage_id)
+        & Q(stage=MigrationRequest.VERIFY_GETTING)
+        & Q(migration__storage__storage=storage_id)
     )
 
     for vr in verify_reqs:
@@ -159,9 +86,8 @@ def monitor_verify(completed_GETs, backend_object):
         # 2. GETs (for none-VERIFY stage, i.e. to actaully download the data)
         # cannot be issued until the Migration.status is ON_STORAGE
         if vr.migration.external_id in completed_GETs:
-            vr.migration.stage = Migration.VERIFYING
-            vr.migration.save()
-            logging.info(
+            vr.stage = MigrationRequest.VERIFYING
+            logging.info((
                 "Transition: batch ID: {} VERIFY_GETTING->VERIFYING"
             ).format(vr.migration.external_id))
             # reset the last archive counter

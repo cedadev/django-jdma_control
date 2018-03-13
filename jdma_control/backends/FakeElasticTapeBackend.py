@@ -22,16 +22,17 @@ class FakeElasticTapeBackend(Backend):
     def monitor(self):
         """Determine which batches have completed."""
         # imported here to avoid circular dependacies
-        from jdma_control.backends.FakeElasticTapeTools import gen_test_feed
-        # generate the RSS feed
-        gen_test_feed()
-        # interpret the RSS feed
-        completed_PUTs, completed_GETs = monitor_et_rss_feed(FS_Settings.ET_RSS_FILE)
-        for cp in completed_PUTs:
-            logging.info("Completed PUT: " + str(cp))
-        for cg in completed_GETs:
-            logging.info("Completed GET:" + str(cg))
-        return completed_PUTs, completed_GETs
+        # from jdma_control.backends.FakeElasticTapeTools import gen_test_feed
+        # # generate the RSS feed
+        # gen_test_feed()
+        # # interpret the RSS feed
+        # completed_PUTs, completed_GETs = monitor_et_rss_feed(FS_Settings.ET_RSS_FILE)
+        # for cp in completed_PUTs:
+        #     logging.info("Completed PUT: " + str(cp))
+        # for cg in completed_GETs:
+        #     logging.info("Completed GET:" + str(cg))
+        # return completed_PUTs, completed_GETs
+        return [],[]
 
     def get(self, batch_id, user, workspace, target_dir, credentials):
         """Download a batch of files from the FakeElasticTape to a target directory."""
