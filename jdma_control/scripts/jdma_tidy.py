@@ -76,10 +76,9 @@ def send_put_notification_email(backend_object, put_req):
     send_mail(subject, msg, fromaddr, toaddrs, fail_silently=False)
 
 
-def send_get_notification_email(get_req, backend_object):
+def send_get_notification_email(backend_object, get_req):
     """Send an email to the user to notify them that their batch upload has been
      completed
-     var jdma_control.models.User user: user to send notification email to
     """
     user = get_req.user
 
@@ -261,34 +260,18 @@ def remove_put_files(backend_object, pr):
         raise Exception(e)
 
 
-def remove_put_requests(backend_object):
-    """Remove the put requests that are ON_STORAGE"""
-    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
-    put_reqs = MigrationRequest.objects.filter(
-        (Q(request_type=MigrationRequest.PUT)
-        | Q(request_type=MigrationRequest.MIGRATE))
-        & Q(migration__storage__storage=storage_id)
-        & Q(stage=MigrationRequest.PUT_COMPLETED)
-    )
-    for pr in put_reqs:
-        logging.info("TIDY: deleting PUT request {}".format(pr.pk))
-        pr.delete()
+def remove_put_request(pr):
+    """Remove a put request that is PUT_COMPLETED and the associated
+    migration is ON_STORAGE"""
+    logging.info("TIDY: deleting PUT request {}".format(pr.pk))
+    pr.delete()
 
 
-def remove_get_requests(backend_object):
-    """Remove the get requests that are ON_DISK"""
-    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
-    # Get the PUT requests for this backend.
-    # This involves resolving two foreign keys
-    get_reqs = MigrationRequest.objects.filter(
-        Q(request_type=MigrationRequest.GET)
-        & Q(migration__storage__storage=storage_id)
-        & Q(stage=MigrationRequest.GET_COMPLETED)
-    )
-    for gr in get_reqs:
-        # only do it if the files are on external storage
-        logging.info("TIDY: deleting GET request {}".format(gr.pk))
-        gr.delete()
+def remove_get_request(gr):
+    """Remove the get requests that are GET_COMPLETED"""
+    logging.info("TIDY: deleting GET request {}".format(gr.pk))
+    gr.delete()
+    print(gr)
 
 
 def update_storage_quota(backend, pr):
@@ -305,7 +288,7 @@ def update_storage_quota(backend, pr):
     quota.save()
 
 
-def PUT_completed(backend_object):
+def PUT_tidy(backend_object):
     """Do the clean up tasks for a completed PUT or MIGRATE request"""
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # these occur during a PUT or MIGRATE request
@@ -316,10 +299,6 @@ def PUT_completed(backend_object):
         & Q(stage=MigrationRequest.PUT_TIDY))
     for pr in put_reqs:
         try:
-            # send a notification email that the puts have completed
-            send_put_notification_email(backend_object, pr)
-            # update the amount of quota the migration has used
-            update_storage_quota(backend_object, pr)
             # remove the temporary staged archive files
             remove_archive_files(backend_object, pr)
             # remove the verification files
@@ -338,8 +317,74 @@ def PUT_completed(backend_object):
             pr.migration.save()
             pr.save()
         except Exception as e:
+            logging.error("TIDY: error in PUT_tidy {}".format(str(e)))
+
+
+def GET_tidy(backend_object):
+    """Do the clean up tasks for a completed GET request"""
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    # these occur during a PUT or MIGRATE request
+    get_reqs = MigrationRequest.objects.filter(
+        Q(request_type=MigrationRequest.GET)
+        & Q(migration__storage__storage=storage_id)
+        & Q(stage=MigrationRequest.GET_TIDY)
+        )
+    for gr in get_reqs:
+        try:
+            # remove the temporary archive files (tarfiles)
+            remove_archive_files(backend_object, gr)
+            # update the request to GET_COMPLETED
+            gr.stage = MigrationRequest.GET_COMPLETED
+            gr.last_archive = 0
+            gr.save()
+        except Exception as e:
+            logging.error("TIDY: error in GET_tidy {}".format(str(e)))
+
+
+def PUT_completed(backend_object):
+    """Do the tasks for a completed PUT request:
+        send a notification email
+        update the quota
+        delete the request
+    """
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    put_reqs = MigrationRequest.objects.filter(
+        (Q(request_type=MigrationRequest.PUT)
+        | Q(request_type=MigrationRequest.MIGRATE))
+        & Q(migration__storage__storage=storage_id)
+        & Q(stage=MigrationRequest.PUT_COMPLETED)
+    )
+    for pr in put_reqs:
+        try:
+            # send a notification email that the puts have completed
+            send_put_notification_email(backend_object, pr)
+            # update the amount of quota the migration has used
+            update_storage_quota(backend_object, pr)
+            # delete the request
+            remove_put_request(pr)
+        except Exception as e:
             logging.error("TIDY: error in PUT_completed {}".format(str(e)))
-            raise Exception(e)
+
+
+def GET_completed(backend_object):
+    """Do the tasks for a completed GET request:
+       send a notification email
+       delete the request
+    """
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    get_reqs = MigrationRequest.objects.filter(
+        Q(request_type=MigrationRequest.GET)
+        & Q(migration__storage__storage=storage_id)
+        & Q(stage=MigrationRequest.GET_COMPLETED)
+    )
+    for gr in get_reqs:
+        #try:
+        if True:
+            # send a notification email that the gets have completed
+            send_get_notification_email(backend_object, gr)
+            remove_get_request(gr)
+        #except Exception as e:
+            logging.error("TIDY: error in GET_completed {}".format(str(e)))
 
 
 def run():
@@ -350,7 +395,9 @@ def run():
     for backend in jdma_control.backends.get_backends():
         backend_object = backend()
         # run in this order so that MigrationRequests are not deleted immediately
-        remove_put_requests(backend_object)
-        remove_get_requests(backend_object)
-
+        # which aids debugging!
         PUT_completed(backend_object)
+        GET_completed(backend_object)
+
+        PUT_tidy(backend_object)
+        GET_tidy(backend_object)

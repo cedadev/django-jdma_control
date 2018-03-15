@@ -59,14 +59,13 @@ def monitor_get(completed_GETs, backend_object):
             # can be downloaded by multiple MigrationRequests
             # The only way to check is to make sure all the files in the
             # original migration are present in the target_dir
-            gr.stage = MigrationRequest.ON_DISK
-            send_get_notification_email(gr, backend_object)
+            gr.stage = MigrationRequest.GET_UNPACKING
             # reset the last archive counter
             gr.last_archive = 0
             gr.save()
-            logging.info(
+            logging.info((
                 "Transition: request ID: {} GETTING->ON_DISK"
-            ).format(gr.pk)
+            ).format(gr.pk))
 
 
 def monitor_verify(completed_GETs, backend_object):

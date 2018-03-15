@@ -31,7 +31,4 @@ echo "8. jdma_tidy PUT_TIDY->PUT_COMPLETED"
 $PWD/manage.py runscript jdma_tidy
 
 echo "9. jdma_tidy PUT_COMPLETED->deleted"
-#$PWD/manage.py runscript jdma_tidy
-
-
-
+$PWD/manage.py runscript jdma_tidy

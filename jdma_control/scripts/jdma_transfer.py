@@ -8,9 +8,13 @@
 
 import os
 import logging
+import subprocess
 from tarfile import TarFile
 
 from django.db.models import Q
+
+from jasmin_ldap.core import *
+from jasmin_ldap.query import *
 
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
@@ -255,8 +259,6 @@ def download_to_staging_directory(backend_object, credentials, pr):
                 conn,
                 pr.migration.external_id,
                 archive_name,
-                pr.migration.user.name,
-                pr.migration.workspace,
                 staging_dir
             )
             # update the last good archive
@@ -352,45 +354,92 @@ def put_transfers(backend_object, key):
                 mark_migration_failed(pr, str(e))
 
 
-#def restore_owner_and_group(backend_object):
-            # # change the owner, group and permissions of the file to match that
-            # # of the original from the user query
-            # with Connection.create(ldap_servers) as conn:
-            #     # query for the user
-            #     query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_USER).filter(uid=gr.migration.unix_user_id)
-            #     # check for a valid return
-            #     if len(query) == 0:
-            #         logging.error("Unix user id: {} not found from LDAP in monitor_get".format(gr.migration.unix_user_id))
-            #         continue
-            #     # use just the first returned result
-            #     q = query[0]
-            #     # # check that the keys exist in q
-            #     if not ("uidNumber" in q):
-            #         logging.error("uidNumber not in returned LDAP query for user id {}".format(gr.migration.unix_user_id))
-            #         continue
-            #     else:
-            #         uidNumber = q["uidNumber"][0]
-            #
-            #     # query for the group
-            #     query = Query(conn, base_dn=settings.JDMA_LDAP_BASE_GROUP).filter(cn=gr.migration.unix_group_id)
-            #     # check for a valid return
-            #     if len(query) == 0:
-            #         logging.error("Unix group id: {} not found from LDAP in monitor_get".format(gr.migration.unix_group_id))
-            #     # use just the first returned result
-            #     q = query[0]
-            #     # check that the keys exist in q
-            #     if not ("gidNumber" in q):
-            #         logging.error("gidNumber not in returned LDAP query for group id {}".format(gr.migration.unix_group_id))
-            #         continue
-            #     else:
-            #         gidNumber = q["gidNumber"][0]
-            #
-            #     # change the directory owner / group
-            #     subprocess.call(["/usr/bin/sudo", "/bin/chown", "-R", str(uidNumber)+":"+str(gidNumber), gr.target_path])
-            #
-            #     # change the permissions back to the original
-            #     subprocess.call(["/usr/bin/sudo", "/bin/chmod", "-R", oct(gr.migration.unix_permission)[2:], gr.target_path])
+def restore_owner_and_group(backend_object, gr, conn):
+    # change the owner, group and permissions of the file to match that
+    # of the original from the user query
 
+    # start at the last_archive so that interrupted uploads can be resumed
+    st_arch = gr.last_archive
+    n_arch = gr.migration.migrationarchive_set.count()
+    archive_set = gr.migration.migrationarchive_set.order_by('pk')
+    for arch_num in range(st_arch, n_arch):
+        # determine which archive to change the permissions for
+        archive = archive_set[arch_num]
+
+        # get the migration files in the archive
+        mig_files = archive.migrationfile_set.all()
+        for mig_file in mig_files:
+            # query for the user
+            query = Query(
+                conn,
+                base_dn=settings.JDMA_LDAP_BASE_USER
+            ).filter(uid=mig_file.unix_user_id)
+            # check for a valid return
+            if len(query) == 0:
+                error_string = ((
+                    "Unix user id: {} not found from LDAP in monitor_get"
+                ).format(mig_file.unix_user_id))
+                raise Exception(error_string)
+            # use just the first returned result
+            q = query[0]
+            # # check that the keys exist in q
+            if not ("uidNumber" in q):
+                error_string = ((
+                    "uidNumber not in returned LDAP query for user id {}"
+                ).format(mig_file.unix_user_id))
+                raise Exception(error_string)
+            else:
+                uidNumber = q["uidNumber"][0]
+
+            # query for the group
+            query = Query(
+                conn,
+                base_dn=settings.JDMA_LDAP_BASE_GROUP
+            ).filter(cn=mig_file.unix_group_id)
+            # check for a valid return
+            if len(query) == 0:
+                error_string = ((
+                    "Unix group id: {} not found from LDAP in monitor_get"
+                ).format(mig_file.unix_group_id))
+                raise Exception(error_string)
+            # use just the first returned result
+            q = query[0]
+            # check that the keys exist in q
+            if not ("gidNumber" in q):
+                error_string = ((
+                    "gidNumber not in returned LDAP query for group id {}"
+                ).format(mig_file.unix_group_id))
+                raise Exception(error_string)
+            else:
+                gidNumber = q["gidNumber"][0]
+
+            # form the file path
+            file_path = os.path.join(
+                gr.target_path,
+                mig_file.path
+            )
+
+            # change the directory owner / group
+            subprocess.call(
+                ["/usr/bin/sudo",
+                 "/bin/chown", "-R",
+                 str(uidNumber)+":"+str(gidNumber),
+                 file_path]
+            )
+
+            # change the permissions back to the original
+            subprocess.call(
+                ["/usr/bin/sudo",
+                 "/bin/chmod", "-R",
+                 str(mig_file.unix_permission),
+                 file_path]
+            )
+
+    # if we reach this point then the restoration has finished.
+    # next stage is tidy up
+    gr.stage = MigrationRequest.GET_TIDY
+    gr.last_archive = 0
+    gr.save()
 
 def get_transfers(backend_object, key):
     """Work through the state machine to download batches from the external
@@ -403,6 +452,12 @@ def get_transfers(backend_object, key):
         Q(request_type=MigrationRequest.GET)
         & Q(migration__storage__storage=storage_id)
     )
+    # create the required ldap server pool, do this just once to
+    # improve performance
+    ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY,
+                              settings.JDMA_LDAP_REPLICAS)
+    conn = Connection.create(ldap_servers)
+
     # for each GET request get the Migration and determine if the type of the
     # Migration is GET_PENDING
     for gr in get_reqs:
@@ -430,6 +485,13 @@ def get_transfers(backend_object, key):
                 # Something went wrong, set FAILED and failure_reason
                 mark_migration_failed(gr, str(e), upload_mig=False)
 
+        elif gr.stage == MigrationRequest.GET_RESTORE:
+            # restore the file permissions
+            try:
+                restore_owner_and_group(backend_object, gr, conn)
+            except Exception as e:
+                mark_migration_failed(gr, str(e), upload_mig=False)
+    conn.close()
 
 def run():
     # setup the logging
