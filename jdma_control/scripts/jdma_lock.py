@@ -293,7 +293,7 @@ def lock_get_directories():
         gr.save()
         logging.info("GET: Locked directory: " + gr.target_path)
         logging.info((
-            "Transition: request ID: {} ON_STORAGE->GET_PENDING"
+            "Transition: request ID: {} GET_START->GET_PENDING"
         ).format(gr.pk))
 
 

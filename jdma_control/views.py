@@ -573,7 +573,7 @@ class MigrationRequestView(View):
             # create a connection to the backend using the credentials
             conn = JDMA_BACKEND_OBJECT.create_connection(
                 user.name,
-                mig.workspace.workspace,
+                mig.workspace,
                 credentials
             )
             #   3b. check that the migration belongs to the user, or has group
@@ -661,7 +661,7 @@ class MigrationRequestView(View):
             return_data["batch_id"] = migration_request.migration.external_id
             return_data["request_type"] = migration_request.request_type
             return_data["workspace"] = migration_request.migration.workspace.workspace
-            return_data["stage"] =  migration_request.migration.stage
+            return_data["stage"] =  migration_request.stage
             return_data["registered_date"] = migration_request.date.isoformat()
             return_data["label"] = migration_request.migration.label
             return_data["target_path"] = target_path

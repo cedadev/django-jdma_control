@@ -162,7 +162,7 @@ transition:
 
 10. GET_START
 =============
-script: jdma_transfer ->
+script: jdma_lock ->
 tasks:
     create the target directory for the download
     create the download staging directory
@@ -191,18 +191,18 @@ script: jdma_monitor ->
 tasks:
     poll for completion of download
 transition:
-    GETTING->GET_UNPACK
+    GETTING->GET_UNPACKING
 
-13. GET_UNPACK
-==============
-script: jdma_packing -> (new script)
+13. GET_UNPACKING
+=================
+script: jdma_pack -> (new script)
 tasks:
     check the digest of the archive matches that in the database
     unpack the tar archives from the download staging directory to the target
       directory
     set last_archive to 0
 transition:
-    GET_UNPACK->GET_RESTORE
+    GET_UNPACKING->GET_RESTORE
 
 14. GET_RESTORE
 ===============
@@ -215,6 +215,7 @@ transition:
 
 15. GET_TIDY
 ============
+script: jdma_tidy ->
 tasks:
     delete the files from the download staging directory
 transition:

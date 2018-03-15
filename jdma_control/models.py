@@ -245,6 +245,9 @@ class MigrationRequest(models.Model):
     REQUEST_MAP = {"PUT": PUT,
                    "GET": GET,
                    "MIGRATE": MIGRATE}
+    REQUEST_LIST = {PUT : 'PUT',
+                    GET : 'GET',
+                    MIGRATE : 'MIGRATE'}
     request_type = models.IntegerField(choices=__REQUEST_CHOICES)
 
     # new state machine for GET / PUT / MIGRATE
@@ -268,7 +271,7 @@ class MigrationRequest(models.Model):
     GET_TIDY=105
     GET_COMPLETED=106
 
-    FAILED=200
+    FAILED=1000
 
     REQ_STAGE_CHOICES = ((PUT_START, 'PUT_START'),
                          (PUT_PENDING, 'PUT_PENDING'),
@@ -288,23 +291,23 @@ class MigrationRequest(models.Model):
                          (GET_COMPLETED, 'GET_COMPLETED'),
                          (FAILED, 'FAILED'))
 
-    REQ_STAGE_LIST = ['PUT_START',
-                      'PUT_PENDING',
-                      'PUT_PACKING',
-                      'PUTTING',
-                      'VERIFY_PENDING',
-                      'VERIFY_GETTING',
-                      'VERIFYING',
-                      'PUT_TIDY',
-                      'PUT_COMPLETED',
-                      'GET_START',
-                      'GET_PENDING',
-                      'GETTING',
-                      'GET_UNPACKING',
-                      'GET_RESTORE',
-                      'GET_TIDY',
-                      'GET_COMPLETED',
-                      'FAILED']
+    REQ_STAGE_LIST = {PUT_START : 'PUT_START',
+                      PUT_PENDING : 'PUT_PENDING',
+                      PUT_PACKING : 'PUT_PACKING',
+                      PUTTING : 'PUTTING',
+                      VERIFY_PENDING : 'VERIFY_PENDING',
+                      VERIFY_GETTING : 'VERIFY_GETTING',
+                      VERIFYING : 'VERIFYING',
+                      PUT_TIDY : 'PUT_TIDY',
+                      PUT_COMPLETED : 'PUT_COMPLETED',
+                      GET_START : 'GET_START',
+                      GET_PENDING : 'GET_PENDING',
+                      GETTING : 'GETTING',
+                      GET_UNPACKING : 'GET_UNPACKING',
+                      GET_RESTORE : 'GET_RESTORE',
+                      GET_TIDY : 'GET_TIDY',
+                      GET_COMPLETED : 'GET_COMPLETED',
+                      FAILED : 'FAILED'}
 
     stage = models.IntegerField(
         choices=REQ_STAGE_CHOICES,
@@ -367,7 +370,7 @@ class MigrationRequest(models.Model):
     )
 
     def __str__(self):
-        return "{:>4} : {:16}".format(self.pk, self.request_type)
+        return "{:>4} : {:16}".format(self.pk, REQUEST_LIST[self.request_type])
 
 
 @python_2_unicode_compatible
