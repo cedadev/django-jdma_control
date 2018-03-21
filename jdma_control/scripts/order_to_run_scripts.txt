@@ -106,6 +106,7 @@ transition:
 script: jdma_transfer -> (move to jdma_verify?)
 tasks:
     create the temporary verification directory
+    create a download batch for the verification
     set last_archive to 0
 transition:
     VERIFY_PENDING->VERIFY_GETTING
