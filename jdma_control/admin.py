@@ -29,11 +29,15 @@ class MigrationAdmin(admin.ModelAdmin):
     save_on_top = True
     list_display = ('pk', 'label', 'user', 'stage', 'workspace',
                     'storage', 'external_id', 'registered_date')
-    list_filter = ('stage', 'registered_date', 'workspace',)
+    list_filter = ('stage', 'registered_date', 'workspace')
 
     fields = ('user', 'label', 'workspace', 'stage', 'storage',
-              'external_id', 'registered_date', 'formatted_filelist')
-    readonly_fields = ('formatted_filelist', 'storage', 'external_id')
+              'external_id', 'registered_date', 'formatted_filelist',
+              'common_path', 'common_path_user_id', 'common_path_group_id',
+              'common_path_permission')
+    readonly_fields = ('formatted_filelist', 'storage', 'external_id',
+                       'common_path', 'common_path_user_id',
+                       'common_path_group_id', 'common_path_permission')
 
     search_fields = ('user', 'label', 'workspace', 'stage', 'external_id')
     inlines = [MigrationArchiveInline]
@@ -42,11 +46,13 @@ admin.site.register(Migration, MigrationAdmin)
 
 class MigrationRequestAdmin(admin.ModelAdmin):
     save_on_top = True
-    list_display = ('pk', 'user', 'request_type', 'stage', 'date', 'migration')
-    list_filter = ('request_type', 'date', 'stage',)
+    list_display = ('pk', 'user', 'request_type', 'stage', 'date',
+                    'migration', 'locked')
+    list_filter = ('request_type', 'date', 'stage', 'locked')
 
     fields = ('user', 'request_type', 'stage', 'date', 'migration',
-              'target_path', 'credentials', 'last_archive', 'failure_reason')
+              'target_path', 'credentials', 'last_archive', 'failure_reason',
+              'locked')
     readonly_fields = ('migration', 'credentials', 'last_archive',
                        'failure_reason')
     search_fields = ('user',)
