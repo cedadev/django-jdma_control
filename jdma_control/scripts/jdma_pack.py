@@ -18,9 +18,13 @@ from jdma_control.scripts.jdma_transfer import mark_migration_failed
 import jdma_control.backends
 
 
-def pack_archive(archive_staging_dir, archive, external_id):
+def pack_archive(archive_staging_dir, archive, pr):
     """Create a tar file containing the files that are in the
        MigrationArchive object"""
+    # external id and common_path
+    external_id = pr.migration.external_id
+    common_path = pr.migration.common_path
+
     # create the directory path for the batch (external_id)
     archive_path = os.path.join(
         archive_staging_dir,
@@ -46,11 +50,13 @@ def pack_archive(archive_staging_dir, archive, external_id):
     for mf in migration_files:
         # don't add if it's a directory - files under the directory will
         # be added
-        if not(os.path.isdir(mf.path)):
-            tar_file.add(mf.path)
+        # get the path, it's the common_path + the migration file path
+        path = os.path.join(common_path, mf.path)
+        if not(os.path.isdir(path)):
+            tar_file.add(path, arcname=mf.path)
             logging.info((
                 "    Adding file to TarFile archive: {}"
-            ).format(mf.path))
+            ).format(path))
 
     tar_file.close()
     # set the size of the archive
@@ -74,7 +80,7 @@ def pack_request(pr, archive_staging_dir):
         archive_path = pack_archive(
             archive_staging_dir,
             archive,
-            pr.migration.external_id
+            pr
         )
         # calculate digest and add to archive
         archive.digest = calculate_digest(archive_path)
@@ -104,12 +110,17 @@ def put_packing(backend_object):
     # for each PUT request pack the archive files.
     # split into a loop so it can be parallelised later
     for pr in put_reqs:
+        # check if locked
+        if pr.locked:
+            continue
         try:
+            pr.lock()
             pack_request(pr, backend_object.ARCHIVE_STAGING_DIR)
+            pr.unlock()
         except Exception as e:
             error_string = (
                 "Could not pack archive for batch: {}: {}"
-            ).format(str(gr.migration.external_id), str(e))
+            ).format(str(pr.migration.external_id), str(e))
             # mark the migration as failed
             mark_migration_failed(pr, error_string)
 
@@ -172,6 +183,7 @@ def unpack_request(gr, archive_staging_dir):
     gr.last_archive = 0
     gr.save()
 
+
 def get_unpacking(backend_object):
     """Unpack the ArchiveFiles from a TarFile to a target directory"""
     # get the storage id for the backend object
@@ -186,7 +198,12 @@ def get_unpacking(backend_object):
     # split into a loop so it can be parallelised later
     for gr in get_reqs:
         try:
+            # check locked
+            if gr.locked:
+                continue
+            gr.lock()
             unpack_request(gr, backend_object.ARCHIVE_STAGING_DIR)
+            gr.unlock()
         except Exception as e:
             error_string = (
                 "Could not unpack request for batch: {}: {}"
@@ -195,11 +212,22 @@ def get_unpacking(backend_object):
             mark_migration_failed(gr, error_string, True)
 
 
-def run():
+def process(backend):
+    backend_object = backend()
+    put_packing(backend_object)
+    get_unpacking(backend_object)
+
+
+def run(*args):
     # setup the logging
     setup_logging(__name__)
-    # loop over all backends - should we parallelise these?
-    for backend in jdma_control.backends.get_backends():
-        backend_object = backend()
-        put_packing(backend_object)
-        get_unpacking(backend_object)
+    if len(args) == 0:
+        for backend in jdma_control.backends.get_backends():
+            process(backend)
+    else:
+        backend = args[0]
+        if not backend in jdma_control.backends.get_backend_ids():
+            logging.error("Backend: " + backend + " not recognised.")
+        else:
+            backend = jdma_control.backends.get_backend_from_id(backend)
+            process(backend)

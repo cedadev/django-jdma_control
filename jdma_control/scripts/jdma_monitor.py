@@ -31,12 +31,18 @@ def monitor_put(completed_PUTs, backend_object):
         & Q(migration__storage__storage=storage_id)
     )
     for pr in put_reqs:
+        # check whether locked
+        if pr.locked:
+            continue
         # check whether it's in the completed_PUTs
         if pr.migration.external_id in completed_PUTs:
+            # lock the migration
+            pr.lock()
             # if it is then migrate to VERIFY_PENDING
             pr.stage = MigrationRequest.VERIFY_PENDING
             # reset the last_archive - needed for verify_get
             pr.last_archive = 0
+            pr.locked = False
             pr.save()
             logging.info((
                 "Transition: batch ID: {} PUTTING->VERIFY_PENDING"
@@ -55,6 +61,9 @@ def monitor_get(completed_GETs, backend_object):
 
     for gr in get_reqs:
         if gr.migration.external_id in completed_GETs:
+            if gr.locked:
+                continue
+            gr.lock()
             # There may be multiple completed_GETs with external_id as Migrations
             # can be downloaded by multiple MigrationRequests
             # The only way to check is to make sure all the files in the
@@ -62,6 +71,7 @@ def monitor_get(completed_GETs, backend_object):
             gr.stage = MigrationRequest.GET_UNPACKING
             # reset the last archive counter
             gr.last_archive = 0
+            gr.locked = False
             gr.save()
             logging.info((
                 "Transition: request ID: {} GETTING->ON_DISK"
@@ -80,28 +90,40 @@ def monitor_verify(completed_GETs, backend_object):
     )
 
     for vr in verify_reqs:
-        # This is fine (in contrast) to above monitor_get as
-        # 1. There is only one GET for each external_id in the VERIFY stage
-        # 2. GETs (for none-VERIFY stage, i.e. to actaully download the data)
-        # cannot be issued until the Migration.status is ON_STORAGE
+        if vr.locked:
+            continue
         if vr.migration.external_id in completed_GETs:
+            vr.lock()
             vr.stage = MigrationRequest.VERIFYING
             logging.info((
                 "Transition: batch ID: {} VERIFY_GETTING->VERIFYING"
             ).format(vr.migration.external_id))
             # reset the last archive counter
             vr.last_archive = 0
+            vr.locked = False
             vr.save()
 
 
-def run():
-    setup_logging(__name__)
+def process(backend):
+    backend_object = backend()
+    completed_PUTs, completed_GETs = backend_object.monitor()
+    # monitor the puts and the gets
+    monitor_put(completed_PUTs, backend_object)
+    monitor_get(completed_GETs, backend_object)
+    monitor_verify(completed_GETs, backend_object)
+
+
+def run(*args):
     # monitor the backends for completed GETs and PUTs (to et)
     # have to monitor each backend
-    for backend in jdma_control.backends.get_backends():
-        backend_object = backend()
-        completed_PUTs, completed_GETs = backend_object.monitor()
-        # monitor the puts and the gets
-        monitor_put(completed_PUTs, backend_object)
-        monitor_get(completed_GETs, backend_object)
-        monitor_verify(completed_GETs, backend_object)
+    setup_logging(__name__)
+    if len(args) == 0:
+        for backend in jdma_control.backends.get_backends():
+            process(backend)
+    else:
+        backend = args[0]
+        if not backend in jdma_control.backends.get_backend_ids():
+            logging.error("Backend: " + backend + " not recognised.")
+        else:
+            backend = jdma_control.backends.get_backend_from_id(backend)
+            process(backend)

@@ -19,10 +19,11 @@ from operator import attrgetter
 from django.db.models import Q
 
 import jdma_site.settings as settings
-from jdma_control.models import Migration, MigrationRequest
+from jdma_control.models import Migration, MigrationRequest, StorageQuota
 from jdma_control.models import MigrationArchive, MigrationFile
 from jasmin_ldap.core import *
 from jasmin_ldap.query import *
+import jdma_control.backends
 from jdma_control.backends.Backend import get_backend_object
 
 FileInfo = namedtuple('FileInfo',
@@ -167,11 +168,6 @@ def lock_migration(pr, conn):
                 # append the root
                 if os.path.isdir(file_info.filepath):
                     fileinfos.append(file_info)
-            # 1. change the owner of the directory to be root
-            # 2. change the read / write permissions to be user-only
-            subprocess.call(["/usr/bin/sudo", "/bin/chown", "-R", "root:root", fd])
-            subprocess.call(["/usr/bin/sudo", "/bin/chmod", "-R", "700", fd])
-
         else:
             # get the info for the file
             file_info = get_file_info_tuple(
@@ -181,10 +177,55 @@ def lock_migration(pr, conn):
             )
             # append to the list of files
             fileinfos.append(file_info)
-            # 1. change the owner of the file to be root
-            # 2. change the read / write permissions to be user-only
-            subprocess.call(["/usr/bin/sudo", "/bin/chown", "root:root", fd])
-            subprocess.call(["/usr/bin/sudo", "/bin/chmod", "700", fd])
+
+    # find the common path for the fileinfos.filepath
+    pr.migration.common_path = os.path.commonprefix(
+        [f.filepath for f in fileinfos]
+    )
+    # get the fileinfo for the common path
+    cp_file_info = get_file_info_tuple(
+        pr.migration.common_path,
+        pr.migration.user.name,
+        conn
+    )
+
+    pr.migration.common_path_user_id = cp_file_info.unix_user_id
+    pr.migration.common_path_group_id = cp_file_info.unix_group_id
+    pr.migration.common_path_permission = cp_file_info.unix_permission
+
+    # change each file / directory in the fileinfos to be root
+    for f in fileinfos:
+        # 1. change the owner of the file to be root
+        # 2. change the read / write permissions to be user-only
+        subprocess.call([
+            "/usr/bin/sudo",
+            "/bin/chown",
+            "root:root",
+            f.filepath
+        ])
+        subprocess.call([
+            "/usr/bin/sudo",
+            "/bin/chmod",
+            "700",
+            f.filepath
+        ])
+
+    # 1. change the owner of the common_path directory to be root
+    # 2. change the read / write permissions to be user-only
+    subprocess.call([
+        "/usr/bin/sudo",
+        "/bin/chown",
+        "-R",
+        "root:root",
+        pr.migration.common_path
+    ])
+    subprocess.call([
+        "/usr/bin/sudo",
+        "/bin/chmod",
+        "-R",
+        "700",
+        pr.migration.common_path
+    ])
 
     # sort the fileinfos based on size using attrgetter
     # this will group all the small files together
@@ -216,7 +257,10 @@ def lock_migration(pr, conn):
             mig_file = MigrationFile()
             fileinfo = fileinfos[n_current_file]
             # fill in the details
-            mig_file.path = fileinfo.filepath
+            # the filepath has the commonprefix removed
+            mig_file.path = fileinfo.filepath.replace(
+                pr.migration.common_path, ""
+            )
             mig_file.size = fileinfo.size
             mig_file.digest = fileinfo.digest
             mig_file.unix_user_id = fileinfo.unix_user_id
@@ -229,9 +273,16 @@ def lock_migration(pr, conn):
             # go to the next file (going backwards through a descending
             # sorted list remember!)
             n_current_file -= 1
-            # save the Migration File
-            mig_file.save()
-            logging.info("PUT: Added file: " + mig_file.path)
+            # don't add the file if it's empty after replacing the common_path
+            # with the null string (e.g. this happens with the root directory)
+            if len(mig_file.path) > 0:
+                # remove the slash if it is the first character as this causes
+                # os.path.join to treat it as the root
+                if mig_file.path[0] == "/":
+                    mig_file.path = mig_file.path[1:]
+                # save the Migration File
+                mig_file.save()
+                logging.info("PUT: Added file: " + mig_file.path)
 
     # set the MigrationRequest stage to be PUT_PENDING and the
     # Migration stage to be PUTTING
@@ -241,17 +292,20 @@ def lock_migration(pr, conn):
     pr.save()
 
 
-def lock_put_filelists():
+def lock_put_filelists(backend_object):
     """Lock the directories that are going to be put to external storage.
        Also build the MigrationFiles entries from walking the directories
        This is to ensure that the user doesn't write any more data to them
        while the external storage write is ongoing.
     """
+    # get the storage id for the backend
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # get the list of PUT requests
     put_reqs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
         & Q(stage=MigrationRequest.PUT_START)
+        & Q(migration__storage__storage=storage_id)
     )
     # create the required ldap server pool, do this just once to
     # improve performance
@@ -261,22 +315,35 @@ def lock_put_filelists():
     # for each PUT request get the Migration and determine if the type of the
     # Migration is ON_DISK
     for pr in put_reqs:
+        # check if locked in the database
+        if pr.locked:
+            continue
+        # lock the migration in the database
+        pr.lock()
         lock_migration(pr, conn)
+        pr.unlock()
     conn.close()
 
 
-def lock_get_directories():
+def lock_get_directories(backend_object):
     """Lock the directories that the targets for recovering data from external
     storage.  This is to ensure that there aren't any filename conflicts.
     """
+    # get the storage id for the backend
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # get the list of GET requests
     get_reqs = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.GET)
         & Q(stage=MigrationRequest.GET_START)
+        & Q(migration__storage__storage=storage_id)
     )
     # for each GET request get the Migration and determine if the type of the
     # Migration is ON_TAP
     for gr in get_reqs:
+        # check locked
+        if gr.locked:
+            continue
+        gr.lock()
         # if it's on external storage then:
         # 1. Make the directory if it doesn't exist
         # 2. change the owner of the directory to be root
@@ -290,6 +357,8 @@ def lock_get_directories():
                         gr.target_path])
         # set the migration stage to be GET_PENDING
         gr.stage = MigrationRequest.GET_PENDING
+        # unlock
+        gr.locked = False
         gr.save()
         logging.info("GET: Locked directory: " + gr.target_path)
         logging.info((
@@ -297,9 +366,24 @@ def lock_get_directories():
         ).format(gr.pk))
 
 
-def run():
+def process(backend):
+    backend_object = backend()
+    lock_put_filelists(backend_object)
+    lock_get_directories(backend_object)
+
+
+def run(*args):
     """Entry point for the Django script run via ``./manage.py runscript``
+    optionally pass the backend_id in as an argument
     """
     setup_logging(__name__)
-    lock_put_filelists()
-    lock_get_directories()
+    if len(args) == 0:
+        for backend in jdma_control.backends.get_backends():
+            process(backend)
+    else:
+        backend = args[0]
+        if not backend in jdma_control.backends.get_backend_ids():
+            logging.error("Backend: " + backend + " not recognised.")
+        else:
+            backend = jdma_control.backends.get_backend_from_id(backend)
+            process(backend)

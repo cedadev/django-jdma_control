@@ -216,27 +216,57 @@ def unlock_original_files(backend_object, pr):
     # use last_archive to enable restart of unlock
     st_arch = pr.last_archive
     n_arch = archive_set.count()
+    common_path = pr.migration.common_path
     for arch_num in range(st_arch, n_arch):
         # determine which archive to stage (tar) and upload
         archive = archive_set[arch_num]
         # get the migrationfiles from the archive
         files_set = archive.migrationfile_set.order_by('pk')
         for f in files_set:
+            # get the full path
+            path = os.path.join(pr.migration.common_path, f.path)
+            # skip the file if it doesn't exist but log
+            if not (os.path.exists(path) or os.path.isdir(path)):
+                logging.error((
+                        "Unlock files: path does not exist {} "
+                    ).format(path)
+                )
+                continue
             # change the owner of the file
             subprocess.call(
                 ["/usr/bin/sudo",
                  "/bin/chown", "-R",
                  "{}:{}".format(f.unix_user_id, f.unix_group_id),
-                 f.path])
+                 path])
             # change the permissions of the file
             subprocess.call(
                 ["/usr/bin/sudo",
                  "/bin/chmod", "-R",
                  "{}".format(f.unix_permission),
-                 f.path]
+                 path]
             )
         pr.last_archive += 1
         pr.save()
+    # unlock the common path
+    if not (os.path.exists(common_path) or os.path.isdir(common_path)):
+        logging.error((
+                "Unlock files: path does not exist {} "
+            ).format(common_path)
+        )
+    else:
+        # change the owner of the file
+        subprocess.call(
+            ["/usr/bin/sudo",
+             "/bin/chown", "-R",
+             "{}:{}".format(f.unix_user_id, f.unix_group_id),
+             common_path])
+        # change the permissions of the file
+        subprocess.call(
+            ["/usr/bin/sudo",
+             "/bin/chmod", "-R",
+             "{}".format(f.unix_permission),
+             common_path]
+        )
 
 
 def remove_put_files(backend_object, pr):
@@ -271,7 +301,6 @@ def remove_get_request(gr):
     """Remove the get requests that are GET_COMPLETED"""
     logging.info("TIDY: deleting GET request {}".format(gr.pk))
     gr.delete()
-    print(gr)
 
 
 def update_storage_quota(backend, pr):
@@ -299,6 +328,10 @@ def PUT_tidy(backend_object):
         & Q(stage=MigrationRequest.PUT_TIDY))
     for pr in put_reqs:
         try:
+            # check locked
+            if pr.locked:
+                continue
+            pr.lock()
             # remove the temporary staged archive files
             remove_archive_files(backend_object, pr)
             # remove the verification files
@@ -307,7 +340,7 @@ def PUT_tidy(backend_object):
             if pr.request_type == MigrationRequest.MIGRATE:
                 remove_original_files(backend_object, pr)
             else:
-            # otherwise unlock them (restore uids, gids and permissions)
+                # otherwise unlock them (restore uids, gids and permissions)
                 unlock_original_files(backend_object, pr)
             # set to completed and last archive to 0
             # pr will be deleted next time jdma_tidy is invoked
@@ -315,6 +348,8 @@ def PUT_tidy(backend_object):
             pr.migration.stage = Migration.ON_STORAGE
             pr.last_archive = 0
             pr.migration.save()
+            # unlock
+            pr.locked = False
             pr.save()
         except Exception as e:
             logging.error("TIDY: error in PUT_tidy {}".format(str(e)))
@@ -331,11 +366,15 @@ def GET_tidy(backend_object):
         )
     for gr in get_reqs:
         try:
+            if gr.locked:
+                continue
+            gr.lock()
             # remove the temporary archive files (tarfiles)
             remove_archive_files(backend_object, gr)
             # update the request to GET_COMPLETED
             gr.stage = MigrationRequest.GET_COMPLETED
             gr.last_archive = 0
+            gr.locked = False
             gr.save()
         except Exception as e:
             logging.error("TIDY: error in GET_tidy {}".format(str(e)))
@@ -356,10 +395,16 @@ def PUT_completed(backend_object):
     )
     for pr in put_reqs:
         try:
+            # check locked
+            if pr.locked:
+                continue
+            pr.lock()
             # send a notification email that the puts have completed
             send_put_notification_email(backend_object, pr)
             # update the amount of quota the migration has used
             update_storage_quota(backend_object, pr)
+            # unlock
+            pr.unlock()
             # delete the request
             remove_put_request(pr)
         except Exception as e:
@@ -378,26 +423,41 @@ def GET_completed(backend_object):
         & Q(stage=MigrationRequest.GET_COMPLETED)
     )
     for gr in get_reqs:
-        #try:
-        if True:
+        try:
+            if gr.locked:
+                continue
+            # lock
+            gr.lock()
             # send a notification email that the gets have completed
             send_get_notification_email(backend_object, gr)
+            # unlock
+            gr.unlock()
             remove_get_request(gr)
-        #except Exception as e:
+        except Exception as e:
             logging.error("TIDY: error in GET_completed {}".format(str(e)))
 
 
-def run():
-    setup_logging(__name__)
-    # these are individual loops to aid debugging and so we can turn them
-    # on / off if we wish
-    # loop over all backends
-    for backend in jdma_control.backends.get_backends():
-        backend_object = backend()
-        # run in this order so that MigrationRequests are not deleted immediately
-        # which aids debugging!
-        PUT_completed(backend_object)
-        GET_completed(backend_object)
+def process(backend):
+    backend_object = backend()
+    # run in this order so that MigrationRequests are not deleted immediately
+    # which aids debugging!
+    PUT_completed(backend_object)
+    GET_completed(backend_object)
 
-        PUT_tidy(backend_object)
-        GET_tidy(backend_object)
+    PUT_tidy(backend_object)
+    GET_tidy(backend_object)
+
+
+def run(*args):
+    # setup the logging
+    setup_logging(__name__)
+    if len(args) == 0:
+        for backend in jdma_control.backends.get_backends():
+            process(backend)
+    else:
+        backend = args[0]
+        if not backend in jdma_control.backends.get_backend_ids():
+            logging.error("Backend: " + backend + " not recognised.")
+        else:
+            backend = jdma_control.backends.get_backend_from_id(backend)
+            process(backend)

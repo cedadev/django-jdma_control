@@ -40,6 +40,11 @@ def verify_files(backend_object):
         & Q(migration__storage__storage=storage_id)
     )
     for pr in put_reqs:
+        # check whether locked
+        if pr.locked:
+            continue
+        # lock the migration
+        pr.lock()
         # get the batch id
         external_id = pr.migration.external_id
         # get the temporary directory
@@ -89,14 +94,26 @@ def verify_files(backend_object):
         pr.stage = MigrationRequest.PUT_TIDY
         # reset last archive
         pr.last_archive = 0
+        # unlock
+        pr.locked = False
         pr.save()
         logging.info((
             "Transition: batch ID: {} VERIFYING->PUT_TIDY"
         ).format(pr.migration.external_id))
 
-def run():
+
+def run(*args):
+    # setup the logging
     setup_logging(__name__)
-    # loop over all backends - should we parallelise these?
-    for backend in jdma_control.backends.get_backends():
-        backend_object = backend()
-        verify_files(backend_object)
+    if len(args) == 0:
+        for backend in jdma_control.backends.get_backends():
+            backend_object = backend()
+            verify_files(backend_object)
+    else:
+        backend = args[0]
+        if not backend in jdma_control.backends.get_backend_ids():
+            logging.error("Backend: " + backend + " not recognised.")
+        else:
+            backend = jdma_control.backends.get_backend_from_id(backend)
+            backend_object = backend()
+            verify_files(backend_object)
