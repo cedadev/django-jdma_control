@@ -28,6 +28,8 @@ def mark_migration_failed(mig_req, failure_reason, upload_mig=True):
     logging.error(failure_reason)
     mig_req.stage = MigrationRequest.FAILED
     mig_req.failure_reason = failure_reason
+    # lock the migration request so it can't be retried
+    mig_req.locked = True
     # only reset these if the upload migration (PUT | MIGRATE) fails
     # if a GET fails then the migration is unaffected
     if upload_mig:
@@ -57,8 +59,8 @@ def create_upload_batch(backend_object, credentials, pr):
             )
             error_string = (
                 "Failed to create the upload batch for migration: {} "
-                "on external storage: {}. Exception: "
-            ).format(pr.migration.pk, storage_name, e)
+                "on external storage: {}. Exception: {}"
+            ).format(pr.migration.pk, storage_name, str(e))
             raise Exception(error_string)
         else:
             pr.migration.external_id = external_id
@@ -284,11 +286,11 @@ def download_to_staging_directory(backend_object, credentials, pr):
             tar_file.close()
 
         except Exception as e:
-            # error_string = (
-            #     "Could not add file: {} to archive: {}"
-            # ).format(mf.path, stage_path)
-            # logging.error(error_string)
-            raise Exception(e)
+            error_string = (
+                "Could not add file: {} to archive: {}, exception: {}"
+            ).format(mf.path, stage_path, str(e))
+            logging.error(error_string)
+            raise Exception(error_string)
 
 
 def put_transfers(backend_object, key):
@@ -312,6 +314,11 @@ def put_transfers(backend_object, key):
     # for each PUT request get the Migration and determine the type of the
     # Migration
     for pr in put_reqs:
+        # check for lock
+        if pr.locked:
+            continue
+        # lock
+        pr.lock()
         # determine the credentials for the user - decrypt if necessary
         if pr.credentials != {}:
             credentials = AES_tools.AES_decrypt_dict(key, pr.credentials)
@@ -352,6 +359,8 @@ def put_transfers(backend_object, key):
             except Exception as e:
                 # Something went wrong, set FAILED and failure_reason
                 mark_migration_failed(pr, str(e))
+        # unlock
+        pr.unlock()
 
 
 def restore_owner_and_group(backend_object, gr, conn):
@@ -422,7 +431,7 @@ def restore_owner_and_group(backend_object, gr, conn):
             # change the directory owner / group
             subprocess.call(
                 ["/usr/bin/sudo",
-                 "/bin/chown", "-R",
+                 "/bin/chown",
                  str(uidNumber)+":"+str(gidNumber),
                  file_path]
             )
@@ -430,16 +439,34 @@ def restore_owner_and_group(backend_object, gr, conn):
             # change the permissions back to the original
             subprocess.call(
                 ["/usr/bin/sudo",
-                 "/bin/chmod", "-R",
+                 "/bin/chmod",
                  str(mig_file.unix_permission),
                  file_path]
             )
+    # restore the target_path
+    # change the directory owner / group
+    subprocess.call(
+        ["/usr/bin/sudo",
+         "/bin/chown",
+         str(gr.migration.common_path_user_id)+":"+str(gr.migration.common_path_group_id),
+         gr.target_path]
+    )
+
+    # change the permissions back to the original
+    subprocess.call(
+        ["/usr/bin/sudo",
+         "/bin/chmod",
+         str(gr.migration.common_path_permission),
+         gr.target_path]
+    )
+
 
     # if we reach this point then the restoration has finished.
     # next stage is tidy up
     gr.stage = MigrationRequest.GET_TIDY
     gr.last_archive = 0
     gr.save()
+
 
 def get_transfers(backend_object, key):
     """Work through the state machine to download batches from the external
@@ -461,6 +488,10 @@ def get_transfers(backend_object, key):
     # for each GET request get the Migration and determine if the type of the
     # Migration is GET_PENDING
     for gr in get_reqs:
+        # check for lock
+        if gr.locked:
+            continue
+        gr.lock()
         # determine the credentials for the user - decrypt if necessary
         if gr.credentials != {}:
             credentials = AES_tools.AES_decrypt_dict(key, gr.credentials)
@@ -491,15 +522,28 @@ def get_transfers(backend_object, key):
                 restore_owner_and_group(backend_object, gr, conn)
             except Exception as e:
                 mark_migration_failed(gr, str(e), upload_mig=False)
+        gr.unlock()
     conn.close()
 
-def run():
+
+def process(backend, key):
+    backend_object = backend()
+    put_transfers(backend_object, key)
+    get_transfers(backend_object, key)
+
+
+def run(*args):
     # setup the logging
     setup_logging(__name__)
     # read the decrypt key
     key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
-    # loop over all backends - should we parallelise these?
-    for backend in jdma_control.backends.get_backends():
-        backend_object = backend()
-        put_transfers(backend_object, key)
-        get_transfers(backend_object, key)
+    if len(args) == 0:
+        for backend in jdma_control.backends.get_backends():
+            process(backend, key)
+    else:
+        backend = args[0]
+        if not backend in jdma_control.backends.get_backend_ids():
+            logging.error("Backend: " + backend + " not recognised.")
+        else:
+            backend = jdma_control.backends.get_backend_from_id(backend)
+            process(backend, key)
