@@ -189,6 +189,33 @@ class Migration(models.Model):
         help_text="Date the request was registered with the JDMA"
     )
 
+    # common path - the common path for the files, as found by
+    # os.path.commonprefix
+    common_path = models.CharField(
+        blank=True,
+        null=True,
+        max_length=2048,
+        help_text="Common path prefix for all files in the filelist"
+    )
+    # gid, uid and file permissions for common_path (cp)
+    common_path_user_id = models.CharField(
+        blank=True,
+        null=True,
+        max_length=256,
+        help_text="uid of original owner of common_path directory"
+    )
+    common_path_group_id = models.CharField(
+        blank=True,
+        null=True,
+        max_length=256,
+        help_text="gid of original owner of common_path directory"
+    )
+    common_path_permission = models.IntegerField(
+        blank=True,
+        null=True,
+        help_text="File permissions of original common_path directory"
+    )
+
     # filelist - for uploading / downloading lists of files
     filelist = ArrayField(
         models.CharField(max_length=1024, unique=True, blank=True),
@@ -369,8 +396,28 @@ class MigrationRequest(models.Model):
         help_text="Last completed uploaded / downloaded archive"
     )
 
+    # whether the MigrationRequest is locked or not
+    # this allows different backend storage systems to reside on different
+    # servers and run multiple instances, without causing race conditions
+    # or acting on the same migration twice
+    locked = models.BooleanField(
+        default=False,
+        help_text="Migration is locked for processing"
+    )
+
     def __str__(self):
-        return "{:>4} : {:16}".format(self.pk, REQUEST_LIST[self.request_type])
+        return "{:>4} : {:16}".format(
+            self.pk,
+            MigrationRequest.REQUEST_LIST[self.request_type]
+        )
+
+    def lock(self):
+        self.locked = True
+        self.save()
+
+    def unlock(self):
+        self.locked = False
+        self.save()
 
 
 @python_2_unicode_compatible
@@ -438,7 +485,7 @@ class MigrationFile(models.Model):
     path = models.CharField(
         max_length=1024,
         null=True,
-        help_text="Absolute path to the file"
+        help_text="Relative path to the file (relative to Migration.common_path)"
     )
     # SHA-256 digest
     digest = models.CharField(
@@ -459,18 +506,18 @@ class MigrationFile(models.Model):
         blank=True,
         null=True,
         max_length=256,
-        help_text="uid of original owner of directory"
+        help_text="uid of original owner of file"
     )
     unix_group_id = models.CharField(
         blank=True,
         null=True,
         max_length=256,
-        help_text="gid of original owner of directory"
+        help_text="gid of original owner of file"
     )
     unix_permission = models.IntegerField(
         blank=True,
         null=True,
-        help_text="File permissions of original directory"
+        help_text="File permissions of original file"
     )
     # which archive does this file belong to?
     archive = models.ForeignKey(
