@@ -906,7 +906,7 @@ class MigrationView(View):
             return HttpError({"error": "No name supplied."})
 
         # return details of a single request
-        if "name" in request.GET and "migration_id" in request.GET:
+        if "migration_id" in request.GET:
             # get the keywords
             keyargs = {"pk": int(request.GET.get("migration_id")),
                        "user__name": request.GET.get("name")}
@@ -1058,6 +1058,205 @@ class MigrationView(View):
 
         return HttpResponse(json.dumps({"none": "none"}),
                             content_type="application/json")
+
+class MigrationFileView(View):
+    """:rest-api
+
+    Requests to resources concerning files in the JASMIN data migration
+    app (JDMA).  Note that there is only a GET method, as creation of
+    MigrationFiles occurs in the jdma_lock script.
+    """
+
+    def get(self, request, *args, **kwargs):
+        """:rest-api"""
+        # if the user name isn't in the request then reject
+        if "name" not in request.GET:
+            return HttpError({"error": "No name supplied."})
+
+        # get the limit
+        if "limit" in request.GET:
+            limit = int(request.GET.get("limit"))
+        else:
+            limit = 0
+
+        if "digest" in request.GET:
+            digest = True
+        else:
+            digest = False
+
+        # do a single migration
+        if "migration_id" in request.GET:
+            mig_id = int(request.GET.get("migration_id"))
+        else:
+            mig_id = None
+        user_name = request.GET.get("name")
+        # get the keywords
+        # keyargs = {"pk": int(request.GET.get("migration_id")),
+        #            "user__name": request.GET.get("name")}
+        if "workspace" in request.GET:
+            workspace = Groupworkspace.objects.filter(
+                workspace=request.GET.get("workspace")
+            )[0]
+        else:
+            workspace = None
+
+        # build the keyargs
+        keyargs = {"user__name": request.GET.get("name")}
+        if mig_id != None:
+            keyargs["pk"] = mig_id
+        if workspace != None:
+            keyargs["workspace"] = workspace
+
+#        try:
+        if True:
+            # get the migrations
+            mig_data = []
+            migrations = Migration.objects.filter(**keyargs)
+            # loop over the migrations and build the data
+            for mig in migrations:
+                mig_data_local = {"migration_id" : mig.id,
+                                  "user" : mig.user.name,
+                                  "workspace" : mig.workspace.workspace,
+                                  "label" : mig.label,
+                                  "storage" : StorageQuota.get_storage_name(
+                                      mig.storage.storage
+                                  )}
+                archives = mig.migrationarchive_set.all()
+                # return data
+                archive_data = []
+                for archive in archives:
+                    arch_dict = {"archive_id" : archive.get_id(),
+                                 "pk" : archive.pk,
+                                 "size" : archive.size,
+                                 "limit" : limit}
+                    # add digest if requested
+                    if digest:
+                        arch_dict["digest"] = archive.digest
+
+                    # get the files
+                    if limit == 0:
+                        files = archive.migrationfile_set.all()
+                    else:
+                        files = archive.migrationfile_set.all()[:limit]
+
+                    # add the files to the archive data
+                    file_data = []
+                    for f in files:
+                        file_dict = {"pk " : f.pk,
+                                     "path" : f.path,
+                                     "size" : f.size}
+                        if digest:
+                            file_dict["digest"] = f.digest
+                        file_data.append(file_dict)
+                    arch_dict["files"] = file_data
+                    archive_data.append(arch_dict)
+                mig_data_local["archives"] = archive_data
+                mig_data.append(mig_data_local)
+
+            data = {"migrations" : mig_data}
+        else:
+#        except Exception:
+            # return error as easily interpreted JSON
+            error_data = {"error": "Batch not found.",
+                          "migration_id": mig_id,
+                          "name": user_name}
+            if workspace:
+                error_data["workspace"] = workspace.workspace
+            return HttpError(error_data)
+
+        return HttpResponse(json.dumps(data), content_type="application/json")
+
+
+class MigrationArchiveView(View):
+    """:rest-api
+
+    Requests to resources concerning archives in the JASMIN data migration
+    app (JDMA).  Note that there is only a GET method, as creation of
+    MigrationArchives occurs in the jdma_lock script.
+    """
+
+    def get(self, request, *args, **kwargs):
+        """:rest-api"""
+        # if the user name isn't in the request then reject
+        if "name" not in request.GET:
+            return HttpError({"error": "No name supplied."})
+        # get the limit
+        if "limit" in request.GET:
+            limit = int(request.GET.get("limit"))
+        else:
+            limit = 0
+
+        if "digest" in request.GET:
+            digest = True
+        else:
+            digest = False
+
+        # do a single migration
+        if "migration_id" in request.GET:
+            mig_id = int(request.GET.get("migration_id"))
+        else:
+            mig_id = None
+        user_name = request.GET.get("name")
+
+        if "workspace" in request.GET:
+            workspace = Groupworkspace.objects.filter(
+                workspace=request.GET.get("workspace")
+            )[0]
+        else:
+            workspace = None
+
+        # build the keyargs
+        keyargs = {"user__name": request.GET.get("name")}
+        if mig_id != None:
+            keyargs["pk"] = mig_id
+        if workspace != None:
+            keyargs["workspace"] = workspace
+
+        try:
+            # get the migrations
+            mig_data = []
+            migrations = Migration.objects.filter(**keyargs)
+            # loop over the migrations and build the data
+            for mig in migrations:
+                mig_data_local = {"migration_id" : mig.id,
+                                  "user" : mig.user.name,
+                                  "workspace" : mig.workspace.workspace,
+                                  "label" : mig.label,
+                                  "storage" : StorageQuota.get_storage_name(
+                                      mig.storage.storage
+                                  )}
+
+                # get the archives
+                if limit == 0:
+                    archives = mig.migrationarchive_set.all()
+                else:
+                    archives = mig.migrationarchive_set.all()[:limit]
+                # return data
+                archive_data = []
+                for archive in archives:
+                    arch_dict = {"archive_id" : archive.get_id(),
+                                 "pk" : archive.pk,
+                                 "size" : archive.size,
+                                 "limit" : limit}
+                    # add digest if requested
+                    if digest:
+                        arch_dict["digest"] = archive.digest
+
+                    archive_data.append(arch_dict)
+                mig_data_local["archives"] = archive_data
+                mig_data.append(mig_data_local)
+
+            data = {"migrations" : mig_data}
+        except Exception:
+            # return error as easily interpreted JSON
+            error_data = {"error": "Batch not found.",
+                          "migration_id": mig_id,
+                          "name": user_name}
+            if workspace:
+                error_data["workspace"] = workspace.workspace
+            return HttpError(error_data)
+
+        return HttpResponse(json.dumps(data), content_type="application/json")
 
 
 def list_backends(request):
