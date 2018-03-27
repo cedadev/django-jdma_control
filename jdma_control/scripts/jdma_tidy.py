@@ -21,6 +21,37 @@ from jdma_control.scripts.jdma_lock import setup_logging
 
 import jdma_control.backends
 
+def get_batch_info_for_email(backend_object, migration):
+    msg = ""
+    msg += "The details of the downloaded batch are:\n"
+    msg += (
+        "    Ex. storage\t\t: {}\n"
+    ).format(str(backend_object.get_id()))
+    msg += (
+        "    Batch id\t\t: {}\n"
+    ).format(str(migration.pk))
+    msg += (
+        "    Workspace\t\t: {}\n"
+    ).format(migration.workspace)
+    msg += (
+        "    Label\t\t\t: {}\n"
+    ).format(migration.label)
+    msg += (
+        "    Date\t\t\t: {}\n"
+    ).format(migration.registered_date.isoformat()[0:16].replace("T"," "))
+    msg += (
+        "    Stage\t\t\t: {}\n"
+    ).format(Migration.STAGE_LIST[migration.stage])
+    # we should have at least one file in the filelist here
+    msg += (
+        "    Filelist\t: {}\n"
+    ).format(migration.formatted_filelist()[0] + "...")
+    msg += (
+        "    External batch id\t\t: {}\n"
+    ).format(migration.external_id)
+    return msg
+
+
 def send_put_notification_email(backend_object, put_req):
     """Send an email to the user to notify them that their batch upload has
     been completed.
@@ -44,34 +75,12 @@ def send_put_notification_email(backend_object, put_req):
         "PUT request has succesfully completed uploading to external storage: "
         "{}\n"
     ).format(backend_object.get_name())
+
     msg += (
         "    Request id\t\t: {}\n"
     ).format(put_req.pk)
-    msg += (
-        "    Ex. storage\t\t: {}\n"
-    ).format(str(backend_object.get_id()))
-    msg += (
-        "    Batch id\t\t: {}\n"
-    ).format(str(put_req.migration.pk))
-    msg += (
-        "    Workspace\t\t: {}\n"
-    ).format(put_req.migration.workspace)
-    msg += (
-        "    Label\t\t\t: {}\n"
-    ).format(put_req.migration.label)
-    msg += (
-        "    Date\t\t\t: {}\n"
-    ).format(put_req.migration.registered_date.isoformat()[0:16].replace("T"," "))
-    msg += (
-        "    Stage\t\t\t: {}\n"
-    ).format(Migration.STAGE_LIST[put_req.migration.stage])
-    # we should have at least one file in the filelist here
-    msg += (
-        "    Filelist\t: {}\n"
-    ).format(put_req.migration.formatted_filelist()[0] + "...")
-    msg += (
-        "    External batch id\t\t: {}\n"
-    ).format(put_req.migration.external_id)
+
+    msg += get_batch_info_for_email(backend_object, put_req.migration)
 
     send_mail(subject, msg, fromaddr, toaddrs, fail_silently=False)
 
@@ -114,32 +123,42 @@ def send_get_notification_email(backend_object, get_req):
     msg += "\n"
     msg += "------------------------------------------------"
     msg += "\n"
-    msg += "The details of the downloaded batch are:\n"
+
+    msg += get_batch_info_for_email(backend_object, get_req.migration)
+
+    send_mail(subject, msg, fromaddr, toaddrs, fail_silently=False)
+
+
+def send_delete_notification_email(backend_object, del_req):
+    """Send an email to the user to notify them that their batch has been
+    succssfully deleted.
+    """
+    user = put_req.user
+
+    if not user.notify:
+        return
+
+    # to address is notify_on_first
+    toaddrs = [user.email]
+    # from address is just a dummy address
+    fromaddr = "support@ceda.ac.uk"
+
+    # subject
+    subject = (
+        "[JDMA] - Notification of deletion from external storage {}"
+    ).format(backend_object.get_name())
+
+    msg = (
+        "DELETE request has succesfully completed deleting from external storage: "
+        "{}\n"
+    ).format(backend_object.get_name())
+
     msg += (
-        "    Ex. storage\t\t: {}\n"
-    ).format(str(backend_object.get_id()))
-    msg += (
-        "    Batch id\t\t: {}\n"
-    ).format(str(get_req.migration.pk))
-    msg += (
-        "    Workspace\t\t: {}\n"
-    ).format(get_req.migration.workspace)
-    msg += (
-        "    Label\t\t\t: {}\n"
-    ).format(get_req.migration.label)
-    msg += (
-        "    Date\t\t\t: {}\n"
-    ).format(get_req.migration.registered_date.isoformat()[0:16].replace("T"," "))
-    msg += (
-        "    Stage\t\t\t: {}\n"
-    ).format(Migration.STAGE_LIST[get_req.migration.stage])
-    # we should have at least one file in the filelist here
-    msg += (
-        "    Filelist\t: {}\n"
-    ).format(get_req.migration.formatted_filelist()[0] + "...")
-    msg += (
-        "    External batch id\t\t: {}\n"
-    ).format(get_req.migration.external_id)
+        "    Request id\t\t: {}\n"
+    ).format(del_req.pk)
+
+    msg += get_batch_info_for_email(backend_object, del_req.migration)
+
     send_mail(subject, msg, fromaddr, toaddrs, fail_silently=False)
 
 
@@ -168,7 +187,7 @@ def remove_verification_files(backend_object, pr):
     batch_id = pr.migration.external_id
     # get the temporary directory
     verify_dir = os.path.join(
-        backend_object.VERIFY_DIR, "batch{}".format(batch_id)
+        backend_object.VERIFY_DIR, "verify_{}".format(batch_id)
     )
     # remove the directory
     if os.path.isdir(verify_dir):
@@ -248,46 +267,29 @@ def unlock_original_files(backend_object, pr):
         pr.last_archive += 1
         pr.save()
     # unlock the common path
-    if not (os.path.exists(common_path) or os.path.isdir(common_path)):
-        logging.error((
-                "Unlock files: path does not exist {} "
-            ).format(common_path)
-        )
-    else:
-        # change the owner of the file
-        subprocess.call(
-            ["/usr/bin/sudo",
-             "/bin/chown", "-R",
-             "{}:{}".format(f.unix_user_id, f.unix_group_id),
-             common_path])
-        # change the permissions of the file
-        subprocess.call(
-            ["/usr/bin/sudo",
-             "/bin/chmod", "-R",
-             "{}".format(f.unix_permission),
-             common_path]
-        )
-
-
-def remove_put_files(backend_object, pr):
-    """Run the file removals in order"""
-    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
-    try:
-        remove_archive_files(backend_object, pr)
-        remove_verification_files(backend_object, pr)
-        # only remove the original files for a MIGRATE
-        if pr.request_type == MigrationRequest.MIGRATE:
-            remove_original_files(backend_object, pr)
+    if common_path != None:
+        if not (os.path.exists(common_path) or os.path.isdir(common_path)):
+            logging.error((
+                    "Unlock files: path does not exist {} "
+                ).format(common_path)
+            )
         else:
-            unlock_original_files(backend_object, pr)
-        # set to completed and last archive to 0
-        # pr will be deleted next time jdma_tidy is invoked
-        #pr.stage = MigrationRequest.PUT_COMPLETED
-        pr.last_archive = 0
-        pr.save()
-
-    except Exception as e:
-        raise Exception(e)
+            # change the owner of the file
+            subprocess.call(
+                ["/usr/bin/sudo",
+                 "/bin/chown", "-R",
+                 "{}:{}".format(
+                    pr.migration.common_path_user_id,
+                    pr.migration.common_path_group_id
+                 ),
+                 common_path])
+            # change the permissions of the file
+            subprocess.call(
+                ["/usr/bin/sudo",
+                 "/bin/chmod", "-R",
+                 "{}".format(pr.migration.common_path_permission),
+                 common_path]
+            )
 
 
 def remove_put_request(pr):
@@ -303,17 +305,26 @@ def remove_get_request(gr):
     gr.delete()
 
 
-def update_storage_quota(backend, pr):
+def remove_delete_request(dr):
+    """Remove the delete requests that are DELETE_COMPLETED"""
+    logging.info("TIDY: deleting DELETE request {}".format(dr.pk))
+    dr.delete()
+
+def update_storage_quota(backend, migration, update="add"):
     """Update the storage quota for a completed PUT request for this backend.
     """
     # update the storage quota for the user by adding up all the archives and
     # subtracting it from the quota
     archive_sum = 0
-    archives = pr.migration.migrationarchive_set.all()
+    archives = migration.migrationarchive_set.all()
     for arch in archives:
         archive_sum += arch.size
-    quota = pr.migration.storage
-    quota.quota_used += archive_sum
+    quota = migration.storage
+    # add or delete?
+    if update == "add":
+        quota.quota_used += archive_sum
+    elif update == "delete":
+        quota.quota_used -= archive_sum
     quota.save()
 
 
@@ -380,6 +391,69 @@ def GET_tidy(backend_object):
             logging.error("TIDY: error in GET_tidy {}".format(str(e)))
 
 
+def DELETE_tidy(backend_object):
+    """Do the tasks to tidy up a DELETE request:
+    Delete the temporary archive files if the associated migration stage
+     > PUT_PACKING
+    Delete the temporary verify files if the associated migration stage
+     > VERIFY_PENDING
+    Restore permissions on original files if request type == PUT and the stage
+     < PUT_TIDY (if after PUT_TIDY the permissions will have been restored for
+     a PUT request, or deleted for a MIGRATE request)
+    """
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    # these occur during a PUT or MIGRATE request
+    del_reqs = MigrationRequest.objects.filter(
+        Q(request_type=MigrationRequest.DELETE)
+        & Q(migration__storage__storage=storage_id)
+        & Q(stage=MigrationRequest.DELETE_TIDY)
+        )
+    for dr in del_reqs:
+        try:
+            if dr.locked:
+                continue
+            dr.lock()
+            # get the associated PUT or MIGRATE requests - there should only be
+            # zero or one
+            put_reqs = MigrationRequest.objects.filter(
+                (Q(request_type=MigrationRequest.PUT)
+                | Q(request_type=MigrationRequest.MIGRATE))
+                & Q(migration=dr.migration)
+                & Q(migration__storage__storage=storage_id)
+            )
+            # loop over these requests and act on the stage of that request
+            for pr in put_reqs:
+                # switch on the stage of the associate request
+                if pr.stage > MigrationRequest.PUT_PACKING:
+                    # remove the temporary staged archive files
+                    remove_archive_files(backend_object, pr)
+                if pr.stage > MigrationRequest.VERIFY_PENDING:
+                    # remove the verification files
+                    remove_verification_files(backend_object, pr)
+                if pr.stage < MigrationRequest.PUT_TIDY:
+                    unlock_original_files(backend_object, pr)
+
+            # get the associate GET requests - there could be many or none
+            get_reqs = MigrationRequest.objects.filter(
+                Q(request_type=MigrationRequest.GET)
+                & Q(migration=dr.migration)
+                & Q(migration__storage__storage=storage_id)
+            )
+            # loop over these requests and find those that stage > GET_PENDING
+            for gr in get_reqs:
+                if gr.stage > MigrationRequest.GET_PENDING:
+                    # remove the temporary staged archive files
+                    remove_archive_files(backend_object, gr)
+
+            # update the request to DELETE_COMPLETED
+            dr.stage = MigrationRequest.DELETE_COMPLETED
+            dr.last_archive = 0
+            dr.locked = False
+            dr.save()
+        except Exception as e:
+            logging.error("TIDY: error in GET_tidy {}".format(str(e)))
+
+
 def PUT_completed(backend_object):
     """Do the tasks for a completed PUT request:
         send a notification email
@@ -402,7 +476,7 @@ def PUT_completed(backend_object):
             # send a notification email that the puts have completed
             send_put_notification_email(backend_object, pr)
             # update the amount of quota the migration has used
-            update_storage_quota(backend_object, pr)
+            update_storage_quota(backend_object, pr.migration, update="add")
             # unlock
             pr.unlock()
             # delete the request
@@ -437,15 +511,67 @@ def GET_completed(backend_object):
             logging.error("TIDY: error in GET_completed {}".format(str(e)))
 
 
+def DELETE_completed(backend_object):
+    """Do the tasks for a completed DELETE request:
+       send a notification email
+       delete the request
+       delete the migration
+       delete any associated requests (PUT, MIGRATE or GETs)
+    """
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    # these occur during a PUT or MIGRATE request
+    del_reqs = MigrationRequest.objects.filter(
+        Q(request_type=MigrationRequest.DELETE)
+        & Q(migration__storage__storage=storage_id)
+        & Q(stage=MigrationRequest.DELETE_COMPLETED)
+        )
+    for dr in del_reqs:
+        try:
+            if dr.locked:
+                continue
+            dr.lock()
+            # get the associated PUT or MIGRATE requests - there should only be
+            # one
+            other_reqs = MigrationRequest.objects.filter(
+                (Q(request_type=MigrationRequest.PUT)
+                | Q(request_type=MigrationRequest.MIGRATE)
+                | Q(request_type=MigrationRequest.GET))
+                & Q(migration=dr.migration)
+                & Q(migration__storage__storage=storage_id)
+            )
+            for otr in other_reqs:
+                logging.info((
+                    "TIDY: deleting request {} associated with DELETE request {}."
+                ).format(otr.pk, dr.pk))
+                otr.delete()
+            # update the quota
+            update_storage_quota(backend_object, dr.migration, update="delete")
+            # delete the migration
+            logging.info((
+                "TIDY: deleting migration {} associated with DELETE request {}."
+            ).format(dr.migration.pk, dr.pk))
+            dr.migration.delete()
+            # delete the delete request
+            logging.info((
+                "TIDY: deleting DELETE request {}."
+            ).format(dr.pk))
+            dr.delete()
+            # we are done!
+        except Exception as e:
+            logging.error("TIDY: error in DELETE_completed {}".format(str(e)))
+
+
 def process(backend):
     backend_object = backend()
     # run in this order so that MigrationRequests are not deleted immediately
     # which aids debugging!
     PUT_completed(backend_object)
     GET_completed(backend_object)
+    DELETE_completed(backend_object)
 
     PUT_tidy(backend_object)
     GET_tidy(backend_object)
+    DELETE_tidy(backend_object)
 
 
 def run(*args):

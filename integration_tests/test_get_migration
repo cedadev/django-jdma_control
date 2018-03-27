@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
+# location of the python executable in the venv
+PYTHON=/home/vagrant/JDMA/venv/bin/python3.6
+MANAGE="$PYTHON $PWD/../manage.py"
+
 # Run the scripts in the order required to test the download from the external storage
 echo "10. jdma_lock GET_START->GET_PENDING"
-$PWD/manage.py runscript jdma_lock
+$MANAGE runscript jdma_lock
 
 echo "11. jdma_transfer GET_PENDING->GETTING"
-$PWD/manage.py runscript jdma_transfer
+$MANAGE runscript jdma_transfer
 
 echo "12. jdma_transfer GETTING->GETTING"
-$PWD/manage.py runscript jdma_transfer
+$MANAGE runscript jdma_transfer
 
 echo "12a.jdma_monitor GETTING->GET_UNPACK"
-$PWD/manage.py runscript jdma_monitor
+$MANAGE runscript jdma_monitor
 
 echo "13. jdma_packing GET_UNPACK->GET_RESTORE"
-$PWD/manage.py runscript jdma_pack
+$MANAGE runscript jdma_pack
 
 echo "14. jdma_transfer GET_RESTORE->GET_TIDY"
-$PWD/manage.py runscript jdma_transfer
+$MANAGE runscript jdma_transfer
 
 echo "15. jdma_tidy GET_TIDY->GET_COMPLETED"
-$PWD/manage.py runscript jdma_tidy
+$MANAGE runscript jdma_tidy
 
 echo "16. jdma_tidy GET_COMPLETED->deleted"
-$PWD/manage.py runscript jdma_tidy
-
-
+$MANAGE runscript jdma_tidy

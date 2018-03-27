@@ -10,7 +10,6 @@ import datetime
 from jasmin_ldap.core import *
 from jasmin_ldap.query import *
 
-from jdma_control.models import *
 import jdma_control.backends
 import jdma_site.settings as settings
 
@@ -89,8 +88,7 @@ class Backend(object):
 
     def get(self, conn, batch_id, archive, target_dir):
         """Get the batch from the external storage and download to a
-        target_dir
-        """
+        target_dir"""
         raise NotImplementedError
 
     def create_upload_batch(self, conn):
@@ -104,8 +102,19 @@ class Backend(object):
 
     def put(self, conn, batch_id, archive):
         """Put a single tarred archive of files into a batch (created using
-        create_batch function) on the external storage
-        """
+        create_batch function) on the external storage"""
+        raise NotImplementedError
+
+    def create_delete_batch(self, conn):
+        """Create a batch for deleting files from the external storage"""
+        raise NotImplementedError
+
+    def close_delete_batch(self, conn, batch_id):
+        """Close the delete batch on the external storage"""
+        raise NotImplementedError
+
+    def delete(self, conn, batch_id, archive):
+        """Delete a single tarred archive of files from the external storage"""
         raise NotImplementedError
 
     # permissions / quota
@@ -114,7 +123,6 @@ class Backend(object):
         on the storage device?
         """
         raise NotImplementedError
-
 
     def _user_has_put_permission(self, username, workspace):
         """Does the user have permission to write to the workspace
@@ -140,24 +148,22 @@ class Backend(object):
                 return False
         return True
 
-
-    def user_has_get_permission(self, conn):
+    def user_has_get_permission(self, batch_id, conn):
         """Does the user have permission to get the migration request from the
         storage device?"""
         raise NotImplementedError
-
 
     def _user_has_get_permission(self, username, workspace):
         """Does the user have permission to get a migration request from the
         storage device? This is a base example, can be overridden and also just
         called on its own.
         """
-        # create the LDAP server pool needed in both GET and PUT requests
+        # create the LDAP server pool needed in for the GET request
         ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY,
                                   settings.JDMA_LDAP_REPLICAS)
 
         # all users in the Group Workspace have permission to read a file from
-        # that workspace get the users in the workspace group
+        # that workspace. Get the users in the workspace group
         with Connection.create(ldap_servers) as ldap_conn:
             query = Query(
                 ldap_conn,
@@ -174,13 +180,64 @@ class Backend(object):
 
         return True
 
-    def user_has_put_quota(self, conn, filelist):
-        """Get the remaining quota for the user in the workspace"""
+    def _user_has_delete_permission(self, username, workspace, batch_id):
+        """Determine whether the user has the permission to delete the batch
+        given by batch_id in the workspace.
+        This should be determined by LDAP roles. i.e.:
+        If the user owns the batch then they can delete it.
+        If the user does not own the batch but is a manager of the workspace
+        then they can delete it.
+        """
+        # avoid circular dependency
+        from jdma_control.models import Migration, Groupworkspace
+
+        # create the LDAP server pool needed in for the GET request
+        ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY,
+                                  settings.JDMA_LDAP_REPLICAS)
+
+        # check the user is a member of the group workspace
+        with Connection.create(ldap_servers) as ldap_conn:
+            query = Query(
+                ldap_conn,
+                base_dn=settings.JDMA_LDAP_BASE_GROUP
+            ).filter(cn="gws_" + workspace)
+
+            # check for a valid return
+            if len(query) == 0:
+                return False
+
+            # check the user is in the workspace
+            if username not in query[0]['memberUid']:
+                return False
+
+        # get the migration
+        try:
+            migration = Migration.objects.get(pk=batch_id)
+
+            # does the user own the migration?
+            if migration.user.name == username:
+                return True
+        except:
+            return False
+
+        # or, is the user a groupworkspace manager of the GWS
+        try:
+            group_workspace = Groupworkspace.objects.get(workspace=workspace)
+            if len(group_workspace.managers.filter(name=username)) == 0:
+                return False
+        except:
+            return False
+        return True
+
+    def user_has_delete_permission(self, batch_id, conn):
+        """Determine whether the user has the permission to delete the batch
+        given by batch_id in the workspace.
+        """
         raise NotImplementedError
 
-    def _user_has_put_quota(self, conn, filelist, username, workspace):
-        """Get the remaining quota for the user in the workspace"""
-        return False
+    def user_has_put_quota(self, conn):
+        """Check the remaining quota for the user in the workspace"""
+        raise NotImplementedError
 
     def get_name(self):
         return "Undefined"     # get the name for error messages

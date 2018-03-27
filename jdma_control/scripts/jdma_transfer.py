@@ -19,27 +19,12 @@ from jasmin_ldap.query import *
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 from jdma_control.models import StorageQuota
-from jdma_control.scripts.jdma_lock import setup_logging, calculate_digest
 import jdma_control.backends
 import jdma_control.backends.AES_tools as AES_tools
+from jdma_control.scripts.common import mark_migration_failed, setup_logging
+from jdma_control.scripts.common import calculate_digest
 
-
-def mark_migration_failed(mig_req, failure_reason, upload_mig=True):
-    logging.error(failure_reason)
-    mig_req.stage = MigrationRequest.FAILED
-    mig_req.failure_reason = failure_reason
-    # lock the migration request so it can't be retried
-    mig_req.locked = True
-    # only reset these if the upload migration (PUT | MIGRATE) fails
-    # if a GET fails then the migration is unaffected
-    if upload_mig:
-        mig_req.migration.stage = Migration.FAILED
-        #mig_req.migration.external_id = None
-        mig_req.migration.save()
-    mig_req.save()
-
-
-def create_upload_batch(backend_object, credentials, pr):
+def start_upload(backend_object, credentials, pr):
     # check we actually have some files to archive first
     if pr.migration.migrationarchive_set.all().count() != 0:
         # open a connection to the backend.  Creating the connection can account
@@ -201,6 +186,16 @@ def download_to_verify(backend_object, credentials, pr):
             pr.save()
         except Exception as e:
             raise(e)
+
+    # close the batch on the external storage - for ET this will trigger the
+    # transport
+    backend_object.close_download_batch(
+        conn,
+        pr.migration.external_id
+    )
+    # close the connection to the backend
+    backend_object.close_connection(conn)
+
     # jdma_monitor will determine when the batch has finished downloading for
     # verification and transition VERIFY_GETTING->VERIFYING
 
@@ -227,7 +222,7 @@ def start_download(backend_object, gr):
         raise(e)
 
 
-def download_to_staging_directory(backend_object, credentials, pr):
+def download_batch(backend_object, credentials, pr):
     """Download the archives files in the GET request to the STAGING_DIR."""
     # open a connection to the backend.  Creating the connection can account
     # for a significant portion of the run time.  So we only do it once!
@@ -269,7 +264,7 @@ def download_to_staging_directory(backend_object, credentials, pr):
         except Exception as e:
             raise(e)
 
-        # the archive has been dowloaded to the staging directory
+        # the archive has been downloaded to the staging directory
         # now unarchive it to the target directory
         try:
             # get the path of the staged tarfile
@@ -291,6 +286,15 @@ def download_to_staging_directory(backend_object, credentials, pr):
             ).format(mf.path, stage_path, str(e))
             logging.error(error_string)
             raise Exception(error_string)
+
+    # close the batch on the external storage - for ET this will trigger the
+    # transport
+    backend_object.close_download_batch(
+        conn,
+        pr.migration.external_id
+    )
+    # close the connection to the backend
+    backend_object.close_connection(conn)
 
 
 def put_transfers(backend_object, key):
@@ -330,7 +334,7 @@ def put_transfers(backend_object, key):
             # create the batch on this instance, next time the script is run
             # the archives will be created as tarfiles
             try:
-                create_upload_batch(backend_object, credentials, pr)
+                start_upload(backend_object, credentials, pr)
             except Exception as e:
                 # Something went wrong, set FAILED and failure_reason
                 mark_migration_failed(pr, str(e))
@@ -511,7 +515,7 @@ def get_transfers(backend_object, key):
         elif gr.stage == MigrationRequest.GETTING:
             # pull back the data from the backend
             try:
-                download_to_staging_directory(backend_object, credentials, gr)
+                download_batch(backend_object, credentials, gr)
             except Exception as e:
                 # Something went wrong, set FAILED and failure_reason
                 mark_migration_failed(gr, str(e), upload_mig=False)
@@ -526,10 +530,156 @@ def get_transfers(backend_object, key):
     conn.close()
 
 
+def start_delete(backend_object, dr):
+    """Create a delete batch on the external storage.
+    Set the last archive to 0.
+    Transition to DELETING."""
+    dr.migration.last_archive = 0
+    dr.migration.save()
+    dr.stage = MigrationRequest.DELETING
+    dr.save()
+
+
+def delete_batch(backend_object, credentials, dr):
+    """Delete the batch, taking turns to delete a single archive at once."""
+    # open a connection to the backend.  Creating the connection can account
+    # for a significant portion of the run time.  So we only do it once!
+    conn = backend_object.create_connection(
+        dr.migration.user.name,
+        dr.migration.workspace.workspace,
+        credentials
+    )
+    # get the storage id for the backend object
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    # find the associated PUT or MIGRATE migration request:
+    # the number of archives uploaded comes from the last_archive of this
+    # migration request (if not zero)
+    try:
+        put_req = MigrationRequest.objects.get(
+            (Q(request_type=MigrationRequest.PUT) |
+            Q(request_type=MigrationRequest.MIGRATE))
+            & Q(migration=dr.migration)
+            & Q(migration__storage__storage=storage_id)
+        )
+    except:
+        put_req = None
+    # start at the last_archive so that interrupted deletes can be resumed
+    st_arch = dr.last_archive
+    # determine how many archives have actually been uploaded
+    if put_req and put_req.last_archive != 0:
+        n_arch = put_req.last_archive
+    else:
+        n_arch = dr.migration.migrationarchive_set.count()
+    # loop over the
+    archive_set = dr.migration.migrationarchive_set.order_by('pk')
+    for arch_num in range(st_arch, n_arch):
+        # determine which archive to download and stage (tar)
+        archive = archive_set[arch_num]
+        try:
+            # get the object name and delete
+            archive_name = archive.get_id() + ".tar"
+            # use Backend.get to pull back the files to a temporary directory
+            logging.info((
+                "Deleting: {}/{}"
+            ).format(dr.migration.external_id, archive_name))
+            backend_object.delete(
+                conn,
+                dr.migration.external_id,
+                archive_name,
+            )
+            # update the last good archive
+            dr.last_archive += 1
+            dr.save()
+
+        except Exception as e:
+            raise(e)
+
+    # close the batch on the external storage - for ET this will trigger the
+    # transport
+    backend_object.close_delete_batch(
+        conn,
+        dr.migration.external_id
+    )
+    # close the connection to the backend
+    backend_object.close_connection(conn)
+
+
+def delete_transfers(backend_object, key):
+    """Work through the state machine to delete batches from the external
+    storage"""
+    # get the storage id for the backend object
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+
+    # get the GET requests which are queued (GET_PENDING) for this backend
+    del_reqs = MigrationRequest.objects.filter(
+        Q(request_type=MigrationRequest.DELETE)
+        & Q(migration__storage__storage=storage_id)
+    )
+    # create the required ldap server pool, do this just once to
+    # improve performance
+    ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY,
+                              settings.JDMA_LDAP_REPLICAS)
+    conn = Connection.create(ldap_servers)
+
+    # for each GET request get the Migration and determine if the type of the
+    # Migration is GET_PENDING
+    for dr in del_reqs:
+        # check for lock
+        if dr.locked:
+            continue
+        dr.lock()
+
+        # find the associated PUT or MIGRATE migration request
+        # if there is one - if not, set put_req to None
+        # there will not be a migration request if the migration has completed
+        # as the migration request is deleted when a PUT or MIGRATE completes
+        try:
+            put_req = MigrationRequest.objects.get(
+                (Q(request_type=MigrationRequest.PUT) |
+                 Q(request_type=MigrationRequest.MIGRATE))
+                & Q(migration=dr.migration)
+                & Q(migration__storage__storage=storage_id)
+            )
+        except:
+            put_req = None
+
+        # determine the credentials for the user - decrypt if necessary
+        if dr.credentials != {}:
+            credentials = AES_tools.AES_decrypt_dict(key, dr.credentials)
+        else:
+            credentials = {}
+
+        # switch on the state machine status
+        if dr.stage == MigrationRequest.DELETE_PENDING:
+            try:
+                # only try to do the delete if some files have been uploaded!
+                if ((put_req and put_req.stage > MigrationRequest.PUT_PACKING)
+                   or (dr.migration.stage == Migration.ON_STORAGE)
+                ):
+                    start_delete(backend_object, dr)
+                else:
+                # transition to DELETE_TIDY if there are no files to delete
+                    dr.stage = MigrationRequest.DELETE_TIDY
+                    dr.save()
+            except Exception as e:
+                # Something went wrong, set FAILED and failure_reason
+                mark_migration_failed(dr, str(e), upload_mig=False)
+
+        elif dr.stage == MigrationRequest.DELETING:
+        # in the process of deleting
+            try:
+                delete_batch(backend_object, credentials, dr)
+            except Exception as e:
+                mark_migration_failed(dr, str(e))
+        # unlock
+        dr.unlock()
+
+
 def process(backend, key):
     backend_object = backend()
     put_transfers(backend_object, key)
     get_transfers(backend_object, key)
+    delete_transfers(backend_object, key)
 
 
 def run(*args):
