@@ -1,34 +1,39 @@
 #!/usr/bin/env bash
 # Run the scripts in the order required to test the upload to the external storage
+
+# location of the python executable in the venv
+PYTHON=/home/vagrant/JDMA/venv/bin/python3.6
+MANAGE="$PYTHON $PWD/../manage.py"
+
 echo "1. jdma_lock PUT_START->PUT_PENDING"
-$PWD/manage.py runscript jdma_lock
+$MANAGE runscript jdma_lock
 
 echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$PWD/manage.py runscript jdma_transfer
+$MANAGE runscript jdma_transfer
 
 echo "3. jdma_pack PUT_PACKING->PUTTING"
-$PWD/manage.py runscript jdma_pack
+$MANAGE runscript jdma_pack
 
 echo "4. jdma_transfer PUTTING->PUTTING"
-$PWD/manage.py runscript jdma_transfer
+$MANAGE runscript jdma_transfer
 
 echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
-$PWD/manage.py runscript jdma_monitor
+$MANAGE runscript jdma_monitor
 
 echo "5. jdma_transfer VERIFY_PENDING->VERIFY_GETTING"
-$PWD/manage.py runscript jdma_transfer
+$MANAGE runscript jdma_transfer
 
 echo "6. jdma_transfer VERIFY_GETTING->VERIFY_GETTING"
-$PWD/manage.py runscript jdma_transfer
+$MANAGE runscript jdma_transfer
 
 echo "6a. jdma_monitor VERIFY_GETTING->VERIFYING"
-$PWD/manage.py runscript jdma_monitor
+$MANAGE runscript jdma_monitor
 
 echo "7. jdma_verify VERIFYING->PUT_TIDY"
-$PWD/manage.py runscript jdma_verify
+$MANAGE runscript jdma_verify
 
 echo "8. jdma_tidy PUT_TIDY->PUT_COMPLETED"
-$PWD/manage.py runscript jdma_tidy
+$MANAGE runscript jdma_tidy
 
 echo "9. jdma_tidy PUT_COMPLETED->deleted"
-$PWD/manage.py runscript jdma_tidy
+$MANAGE runscript jdma_tidy

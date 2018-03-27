@@ -1,0 +1,379 @@
+#!/usr/bin/env bash
+# Test the interactions if a DELETE request is made at different stages of a PUT
+# request
+
+# location of the python executable in the venv
+PYTHON=/home/vagrant/JDMA/venv/bin/python3.6
+MANAGE="$PYTHON $PWD/../manage.py"
+
+case "$1" in
+
+############################ TEST 1 ############################
+1)
+# Delete during PUT_START
+
+# schedule the PUT migration request first - we can use the JSON version of
+# the returned data
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 2 ############################
+2)
+# Delete during PUT_PENDING
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first phase of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 3 ############################
+3)
+# Delete during PUT_PACKING
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first two phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+$MANAGE runscript jdma_transfer
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 4 ############################
+4)
+# Delete during PUTTING (transfer)
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first two phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+$MANAGE runscript jdma_transfer
+echo "3. jdma_pack PUT_PACKING->PUTTING"
+$MANAGE runscript jdma_pack
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 5 ############################
+5)
+# Delete during PUTTING (monitor)
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first two phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+$MANAGE runscript jdma_transfer
+echo "3. jdma_pack PUT_PACKING->PUTTING"
+$MANAGE runscript jdma_pack
+echo "4. jdma_transfer PUTTING->PUTTING"
+$MANAGE runscript jdma_transfer
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 6 ############################
+6)
+# Delete during VERIFY_PENDING
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first two phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+$MANAGE runscript jdma_transfer
+echo "3. jdma_pack PUT_PACKING->PUTTING"
+$MANAGE runscript jdma_pack
+echo "4. jdma_transfer PUTTING->PUTTING"
+$MANAGE runscript jdma_transfer
+echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
+$MANAGE runscript jdma_monitor
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 7 ############################
+7)
+# Delete during VERIFY_GETTING
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first two phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+$MANAGE runscript jdma_transfer
+echo "3. jdma_pack PUT_PACKING->PUTTING"
+$MANAGE runscript jdma_pack
+echo "4. jdma_transfer PUTTING->PUTTING"
+$MANAGE runscript jdma_transfer
+echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
+$MANAGE runscript jdma_monitor
+echo "5. jdma_transfer VERIFY_PENDING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 8 ############################
+8)
+# Delete during VERIFY_GETTING (monitor)
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first two phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+$MANAGE runscript jdma_transfer
+echo "3. jdma_pack PUT_PACKING->PUTTING"
+$MANAGE runscript jdma_pack
+echo "4. jdma_transfer PUTTING->PUTTING"
+$MANAGE runscript jdma_transfer
+echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
+$MANAGE runscript jdma_monitor
+echo "5. jdma_transfer VERIFY_PENDING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+echo "6. jdma_transfer VERIFY_GETTING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 9 ############################
+9)
+# Delete during VERIFYING
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first two phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+$MANAGE runscript jdma_transfer
+echo "3. jdma_pack PUT_PACKING->PUTTING"
+$MANAGE runscript jdma_pack
+echo "4. jdma_transfer PUTTING->PUTTING"
+$MANAGE runscript jdma_transfer
+echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
+$MANAGE runscript jdma_monitor
+echo "5. jdma_transfer VERIFY_PENDING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+echo "6. jdma_transfer VERIFY_GETTING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+echo "6a. jdma_monitor VERIFY_GETTING->VERIFYING"
+$MANAGE runscript jdma_monitor
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 10 ############################
+10)
+# Delete during PUT_TIDY
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first two phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+$MANAGE runscript jdma_transfer
+echo "3. jdma_pack PUT_PACKING->PUTTING"
+$MANAGE runscript jdma_pack
+echo "4. jdma_transfer PUTTING->PUTTING"
+$MANAGE runscript jdma_transfer
+echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
+$MANAGE runscript jdma_monitor
+echo "5. jdma_transfer VERIFY_PENDING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+echo "6. jdma_transfer VERIFY_GETTING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+echo "6a. jdma_monitor VERIFY_GETTING->VERIFYING"
+$MANAGE runscript jdma_monitor
+echo "7. jdma_verify VERIFYING->PUT_TIDY"
+$MANAGE runscript jdma_verify
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 11 ############################
+11)
+# Delete during PUT_COMPLETED
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first two phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+$MANAGE runscript jdma_transfer
+echo "3. jdma_pack PUT_PACKING->PUTTING"
+$MANAGE runscript jdma_pack
+echo "4. jdma_transfer PUTTING->PUTTING"
+$MANAGE runscript jdma_transfer
+echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
+$MANAGE runscript jdma_monitor
+echo "5. jdma_transfer VERIFY_PENDING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+echo "6. jdma_transfer VERIFY_GETTING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+echo "6a. jdma_monitor VERIFY_GETTING->VERIFYING"
+$MANAGE runscript jdma_monitor
+echo "7. jdma_verify VERIFYING->PUT_TIDY"
+$MANAGE runscript jdma_verify
+echo "8. jdma_tidy PUT_TIDY->PUT_COMPLETED"
+$MANAGE runscript jdma_tidy
+
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+############################ TEST 12 ############################
+12)
+# Delete during PUT_COMPLETED
+
+# schedule put request
+batch_id=`$PWD/test_put_request | jq '.batch_id'`
+echo $batch_id
+
+# run the first two phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PENDING"
+$MANAGE runscript jdma_lock
+echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+$MANAGE runscript jdma_transfer
+echo "3. jdma_pack PUT_PACKING->PUTTING"
+$MANAGE runscript jdma_pack
+echo "4. jdma_transfer PUTTING->PUTTING"
+$MANAGE runscript jdma_transfer
+echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
+$MANAGE runscript jdma_monitor
+echo "5. jdma_transfer VERIFY_PENDING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+echo "6. jdma_transfer VERIFY_GETTING->VERIFY_GETTING"
+$MANAGE runscript jdma_transfer
+echo "6a. jdma_monitor VERIFY_GETTING->VERIFYING"
+$MANAGE runscript jdma_monitor
+echo "7. jdma_verify VERIFYING->PUT_TIDY"
+$MANAGE runscript jdma_verify
+echo "8. jdma_tidy PUT_TIDY->PUT_COMPLETED"
+$MANAGE runscript jdma_tidy
+echo "9. jdma_tidy PUT_COMPLETED->deleted"
+$MANAGE runscript jdma_tidy
+# schedule the DELETE request
+$PWD/test_delete_request $batch_id
+
+# run the delete transitions
+$PWD/test_delete_migration
+;;
+
+esac
+
+#
+# echo "1. jdma_lock PUT_START->PUT_PENDING"
+# $PWD/manage.py runscript jdma_lock
+#
+# echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
+# $PWD/manage.py runscript jdma_transfer
+#
+# echo "3. jdma_pack PUT_PACKING->PUTTING"
+# $PWD/manage.py runscript jdma_pack
+#
+# echo "4. jdma_transfer PUTTING->PUTTING"
+# $PWD/manage.py runscript jdma_transfer
+#
+# echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
+# $PWD/manage.py runscript jdma_monitor
+#
+# echo "5. jdma_transfer VERIFY_PENDING->VERIFY_GETTING"
+# $PWD/manage.py runscript jdma_transfer
+#
+# echo "6. jdma_transfer VERIFY_GETTING->VERIFY_GETTING"
+# $PWD/manage.py runscript jdma_transfer
+#
+# echo "6a. jdma_monitor VERIFY_GETTING->VERIFYING"
+# $PWD/manage.py runscript jdma_monitor
+#
+# echo "7. jdma_verify VERIFYING->PUT_TIDY"
+# $PWD/manage.py runscript jdma_verify
+#
+# echo "8. jdma_tidy PUT_TIDY->PUT_COMPLETED"
+# $PWD/manage.py runscript jdma_tidy
+#
+# echo "9. jdma_tidy PUT_COMPLETED->deleted"
+# $PWD/manage.py runscript jdma_tidy

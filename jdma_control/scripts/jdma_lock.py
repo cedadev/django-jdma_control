@@ -4,16 +4,15 @@ ON_DISK -> PUT_PENDING     - locks the directory for migration by changing
 ON_STORAGE -> GET_PENDING  - create the target directory, and lock it by
    changing the owner again
 
-This is a simple program that is designed to be run at high-frequency,
-e.g. every minute even.
+This has become a less simple program that could be run less frequently than
+previously designed, e.g. every hour even.
+It is the digest calculation that takes time so we could split that into a
+different part of the state machine
 """
 
-import datetime
 import logging
-import subprocess
 import os
-import hashlib
-from collections import namedtuple
+import subprocess
 from operator import attrgetter
 
 from django.db.models import Q
@@ -26,98 +25,7 @@ from jasmin_ldap.query import *
 import jdma_control.backends
 from jdma_control.backends.Backend import get_backend_object
 
-FileInfo = namedtuple('FileInfo',
-                      ['filepath', 'size', 'digest', 'unix_user_id',
-                       'unix_group_id', 'unix_permission'], verbose=False)
-
-
-def calculate_digest(filename):
-    # Calculate the hex digest of the file, using a buffer
-    BUFFER_SIZE = 256 * 1024  # (256KB) - adjust this
-
-    # create a sha256 object
-    sha256 = hashlib.sha256()
-
-    # read through the file
-    with open(filename, 'rb') as file:
-        while True:
-            data = file.read(BUFFER_SIZE)
-            if not data:  # EOF
-                break
-            sha256.update(data)
-    return "{0}".format(sha256.hexdigest())
-
-
-def setup_logging(module_name):
-    # setup the logging
-    try:
-        log_path = settings.LOG_PATH
-    except Exception:
-        log_path = "./"
-
-    # Make the logging dir if it doesn't exist
-    if not os.path.isdir(log_path):
-        os.makedirs(log_path)
-
-    date = datetime.datetime.utcnow()
-    date_string = "%d%02i%02iT%02i%02i%02i" % (
-        date.year,
-        date.month,
-        date.day,
-        date.hour,
-        date.minute,
-        date.second
-    )
-    log_fname = log_path + "/" + module_name + "_" + date_string
-
-    logging.basicConfig(filename=log_fname, level=logging.DEBUG)
-
-
-def get_file_info_tuple(filepath, user_name, conn):
-    """Get all the info for a file, and return in a tuple.
-    Info is: size, SHA-256 digest, unix-uid, unix-gid, unix-permissions"""
-    # get the permissions etc. of the original file
-    fstat = os.stat(filepath)
-    size = fstat.st_size
-    # calc SHA256 digest
-    if os.path.isdir(filepath):
-        digest = 0
-    else:
-        digest = calculate_digest(filepath)
-    # get the unix user id owner of the file - use LDAP now
-    # query to find username with uidNumber matching fstat.st_uid - default to
-    # user
-    query = Query(
-        conn,
-        base_dn=settings.JDMA_LDAP_BASE_USER
-    ).filter(uidNumber=fstat.st_uid)
-    if len(query) == 0 or len(query[0]) == 0:
-        unix_user_id = user_name
-    else:
-        unix_user_id = query[0]["uid"][0]
-
-    # query to find group with gidNumber matching fstat.gid - default to users
-    # group
-    query = Query(
-        conn,
-        base_dn=settings.JDMA_LDAP_BASE_GROUP
-    ).filter(gidNumber=fstat.st_gid)
-    if len(query) == 0 or len(query[0]) == 0:
-        unix_group_id = "users"
-    else:
-        unix_group_id = query[0]["cn"][0]
-
-    # get the unix permissions
-    unix_permission = "{}".format(oct(fstat.st_mode))
-    unix_permission = int(unix_permission[-3:])
-    return FileInfo(
-        filepath,
-        size,
-        digest,
-        unix_user_id,
-        unix_group_id,
-        unix_permission
-    )
+from jdma_control.scripts.common import *
 
 
 def lock_migration(pr, conn):
@@ -149,7 +57,7 @@ def lock_migration(pr, conn):
                     fileinfos.append(file_info)
                 # directories
                 for dl in dirs:
-                    filepath = os.path.join(root, fl)
+                    filepath = os.path.join(root, dl)
                     # get the info for the file
                     file_info = get_file_info_tuple(
                         filepath,
@@ -239,6 +147,9 @@ def lock_migration(pr, conn):
     # (when current file < 0)
     n_current_file = len(fileinfos) - 1
 
+    # keep tabs on the total size
+    total_size = 0
+
     while n_current_file >= 0:
         # create a new MigrationArchive
         mig_arc = MigrationArchive()
@@ -269,7 +180,10 @@ def lock_migration(pr, conn):
             mig_file.archive = mig_arc
 
             # add the size to the current archive size
-            current_size += fileinfos[n_current_file].size
+            current_size += fileinfo.size
+            # add the size to the total size for the migration - to check
+            # agains the quota
+            total_size += fileinfo.size
             # go to the next file (going backwards through a descending
             # sorted list remember!)
             n_current_file -= 1
@@ -284,12 +198,29 @@ def lock_migration(pr, conn):
                 mig_file.save()
                 logging.info("PUT: Added file: " + mig_file.path)
 
-    # set the MigrationRequest stage to be PUT_PENDING and the
-    # Migration stage to be PUTTING
-    pr.stage = MigrationRequest.PUT_PENDING
-    pr.migration.stage = Migration.PUTTING
-    pr.migration.save()
-    pr.save()
+    # check whether the total size + the quota_used is greater than the
+    # quota_size
+    storage = pr.migration.storage
+    if total_size + storage.quota_used > storage.quota_size:
+        error_string = ((
+            "Moving files to external storage: {} would cause the quota for the"
+            " workspace: {} to be exceeded.\n"
+            " Current used quota: {} \n"
+            " Quota size: {} \n"
+            " Size of files in request: {} \n"
+        ).format(StorageQuota.get_storage_name(storage.storage),
+                 pr.migration.workspace.workspace,
+                 storage.quota_formatted_used(),
+                 storage.quota_formatted_size(),
+                 sizeof_fmt(total_size)))
+        mark_migration_failed(pr, error_string)
+    else:
+        # set the MigrationRequest stage to be PUT_PENDING and the
+        # Migration stage to be PUTTING
+        pr.stage = MigrationRequest.PUT_PENDING
+        pr.migration.stage = Migration.PUTTING
+        pr.migration.save()
+        pr.save()
 
 
 def lock_put_filelists(backend_object):
@@ -366,10 +297,49 @@ def lock_get_directories(backend_object):
         ).format(gr.pk))
 
 
+def lock_delete_migrations(backend_object):
+    # get the storage id for the backend
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    # get the list of GET requests
+    del_reqs = MigrationRequest.objects.filter(
+        Q(request_type=MigrationRequest.DELETE)
+        & Q(stage=MigrationRequest.DELETE_START)
+        & Q(migration__storage__storage=storage_id)
+    )
+    # set any associated MigrationRequests - i.e. acting on the same Migration
+    # to locked
+    for dr in del_reqs:
+        # lock this migration request as well
+        if dr.locked:
+            continue
+        dr.lock()
+        # find the associated PUT, MIGRATE and GET migration requests and lock
+        # them
+        other_reqs = MigrationRequest.objects.filter(
+            (Q(request_type=MigrationRequest.PUT)
+            | Q(request_type=MigrationRequest.MIGRATE)
+            | Q(request_type=MigrationRequest.GET))
+            & Q(migration=dr.migration)
+            & Q(migration__storage__storage=storage_id)
+        )
+        # lock the associated migration(s)
+        for otr in other_reqs:
+            otr.lock()
+        # transition to DELETE_PENDING
+        dr.stage = MigrationRequest.DELETE_PENDING
+        dr.locked = False
+        dr.save()
+        logging.info("DELETE: Locked migration: {}".format(dr.migration.pk))
+        logging.info((
+            "Transition: request ID: {} GET_START->GET_PENDING"
+        ).format(dr.pk))
+
+
 def process(backend):
     backend_object = backend()
     lock_put_filelists(backend_object)
     lock_get_directories(backend_object)
+    lock_delete_migrations(backend_object)
 
 
 def run(*args):

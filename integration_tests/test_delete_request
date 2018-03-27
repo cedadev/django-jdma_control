@@ -1,0 +1,3 @@
+# add a delete request
+# use the jdma client virtual env to run the python
+/home/vagrant/JDMA_client/bin/python2.7 /Coding/jdma_client/jdma_client/jdma.py -f delete $1

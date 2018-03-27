@@ -157,12 +157,14 @@ class Migration(models.Model):
     PUTTING = 1
     ON_STORAGE = 2
     FAILED = 3
+    DELETING = 4
 
     STAGE_CHOICES = ((ON_DISK, 'ON_DISK'),
                      (PUTTING, 'PUTTING'),
                      (ON_STORAGE, 'ON_STORAGE'),
-                     (FAILED, 'FAILED'))
-    STAGE_LIST = ['ON_DISK', 'PUTTING', 'ON_STORAGE', 'FAILED']
+                     (FAILED, 'FAILED'),
+                     (DELETING, 'DELETING'))
+    STAGE_LIST = ['ON_DISK', 'PUTTING', 'ON_STORAGE', 'FAILED', 'DELETING']
     stage = models.IntegerField(choices=STAGE_CHOICES, default=FAILED)
 
     # batch id for external storage
@@ -265,16 +267,20 @@ class MigrationRequest(models.Model):
     PUT = 0
     GET = 1
     MIGRATE = 2
+    DELETE = 3
 
     __REQUEST_CHOICES = ((PUT, 'PUT'),
                          (GET, 'GET'),
-                         (MIGRATE, 'MIGRATE'))
-    REQUEST_MAP = {"PUT": PUT,
-                   "GET": GET,
-                   "MIGRATE": MIGRATE}
+                         (MIGRATE, 'MIGRATE'),
+                         (DELETE, 'DELETE'))
+    REQUEST_MAP = {'PUT': PUT,
+                   'GET': GET,
+                   'MIGRATE': MIGRATE,
+                   'DELETE' : DELETE}
     REQUEST_LIST = {PUT : 'PUT',
                     GET : 'GET',
-                    MIGRATE : 'MIGRATE'}
+                    MIGRATE : 'MIGRATE',
+                    DELETE : 'DELETE'}
     request_type = models.IntegerField(choices=__REQUEST_CHOICES)
 
     # new state machine for GET / PUT / MIGRATE
@@ -298,6 +304,12 @@ class MigrationRequest(models.Model):
     GET_TIDY=105
     GET_COMPLETED=106
 
+    DELETE_START=200
+    DELETE_PENDING=201
+    DELETING=202
+    DELETE_TIDY=203
+    DELETE_COMPLETED=204
+
     FAILED=1000
 
     REQ_STAGE_CHOICES = ((PUT_START, 'PUT_START'),
@@ -309,6 +321,7 @@ class MigrationRequest(models.Model):
                          (VERIFYING, 'VERIFYING'),
                          (PUT_TIDY, 'PUT_TIDY'),
                          (PUT_COMPLETED, 'PUT_COMPLETED'),
+
                          (GET_START, 'GET_START'),
                          (GET_PENDING, 'GET_PENDING'),
                          (GETTING, 'GETTING'),
@@ -316,6 +329,13 @@ class MigrationRequest(models.Model):
                          (GET_RESTORE, 'GET_RESTORE'),
                          (GET_TIDY, 'GET_TIDY'),
                          (GET_COMPLETED, 'GET_COMPLETED'),
+
+                         (DELETE_START, 'DELETE_START'),
+                         (DELETE_PENDING, 'DELETE_PENDING'),
+                         (DELETING, 'DELETING'),
+                         (DELETE_TIDY, 'DELETE_TIDY'),
+                         (DELETE_COMPLETED, 'DELETE_COMPLETED'),
+
                          (FAILED, 'FAILED'))
 
     REQ_STAGE_LIST = {PUT_START : 'PUT_START',
@@ -327,6 +347,7 @@ class MigrationRequest(models.Model):
                       VERIFYING : 'VERIFYING',
                       PUT_TIDY : 'PUT_TIDY',
                       PUT_COMPLETED : 'PUT_COMPLETED',
+
                       GET_START : 'GET_START',
                       GET_PENDING : 'GET_PENDING',
                       GETTING : 'GETTING',
@@ -334,6 +355,13 @@ class MigrationRequest(models.Model):
                       GET_RESTORE : 'GET_RESTORE',
                       GET_TIDY : 'GET_TIDY',
                       GET_COMPLETED : 'GET_COMPLETED',
+
+                      DELETE_START : 'DELETE_START',
+                      DELETE_PENDING : 'DELETE_PENDING',
+                      DELETING : 'DELETING',
+                      DELETE_TIDY : 'DELETE_TIDY',
+                      DELETE_COMPLETED : 'DELETE_COMPLETED',
+
                       FAILED : 'FAILED'}
 
     stage = models.IntegerField(

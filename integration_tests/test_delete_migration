@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+# location of the python executable in the venv
+PYTHON=/home/vagrant/JDMA/venv/bin/python3.6
+MANAGE="$PYTHON $PWD/../manage.py"
+
+# Run the scripts in the order required to test deleting from the external storage
+echo "17. jdma_lock DELETE_START->DELETE_PENDING"
+$MANAGE runscript jdma_lock
+
+echo "18. jdma_transfer DELETE_PENDING->DELETING"
+$MANAGE runscript jdma_transfer
+
+echo "19. jdma_transfer DELETING->DELETING"
+$MANAGE runscript jdma_transfer
+
+echo "19a.jdma_monitor DELETING->DELETE_TIDY"
+$MANAGE runscript jdma_monitor
+
+echo "20. jdma_tidy DELETE_TIDY->DELETE_COMPLETED"
+$MANAGE runscript jdma_tidy
+
+echo "21. jdma_tidy DELETE_COMPLETED->deleted"
+$MANAGE runscript jdma_tidy

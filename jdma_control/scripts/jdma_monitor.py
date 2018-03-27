@@ -58,7 +58,6 @@ def monitor_get(completed_GETs, backend_object):
         & Q(stage=MigrationRequest.GETTING)
         & Q(migration__storage__storage=storage_id)
     )
-
     for gr in get_reqs:
         if gr.migration.external_id in completed_GETs:
             if gr.locked:
@@ -104,13 +103,38 @@ def monitor_verify(completed_GETs, backend_object):
             vr.save()
 
 
+def monitor_delete(completed_DELETEs, backend_object):
+    """Monitor the DELETEs and transition from DELETING to DELETE_TIDY"""
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    delete_reqs = MigrationRequest.objects.filter(
+        Q(request_type=MigrationRequest.DELETE)
+        & Q(stage=MigrationRequest.DELETING)
+        & Q(migration__storage__storage=storage_id)
+    )
+
+    for dr in delete_reqs:
+        if dr.locked:
+            continue
+        if dr.migration.external_id in completed_DELETEs:
+            dr.lock()
+            dr.stage = MigrationRequest.DELETE_TIDY
+            logging.info((
+                "Transition: batch ID: {} DELETING->DELETE_TIDY"
+            ).format(dr.migration.external_id))
+            # reset the last archive counter
+            dr.last_archive = 0
+            dr.locked = False
+            dr.save()
+
+
 def process(backend):
     backend_object = backend()
-    completed_PUTs, completed_GETs = backend_object.monitor()
+    completed_PUTs, completed_GETs, completed_DELETEs = backend_object.monitor()
     # monitor the puts and the gets
     monitor_put(completed_PUTs, backend_object)
     monitor_get(completed_GETs, backend_object)
     monitor_verify(completed_GETs, backend_object)
+    monitor_delete(completed_DELETEs, backend_object)
 
 
 def run(*args):

@@ -90,7 +90,7 @@ def monitor_et_rss_feed(feed):
                 completed_GETs.append(rss_i)
             elif rss_i.status == PUT_COMPLETE:
                 completed_PUTs.append(rss_i)
-    return completed_PUTs, completed_GETs
+    return completed_PUTs, completed_GETs, []
 
 
 class ElasticTapeBackend(Backend):
@@ -104,14 +104,14 @@ class ElasticTapeBackend(Backend):
 
     def monitor(self):
         """Determine which batches have completed."""
-        completed_PUTs, completed_GETs = monitor_et_rss_feed(ET_Settings.ET_RSS_FILE)
-        return completed_PUTs, completed_GETs
+        completed_PUTs, completed_GETs, completed_DELETEs = monitor_et_rss_feed(ET_Settings.ET_RSS_FILE)
+        return completed_PUTs, completed_GETs, completed_DELETEs
 
     def get(self, batch_id, user, workspace, target_dir, credentials):
         """Download a batch of files from the Elastic Tape to a target directory."""
         pass
 
-    def put(self, filelist, user, workspace, credentials):
+    def put(self, conn, batch_id, archive):
         """Put a list of files onto the Elastic Tape - return the external storage batch id"""
         # create connection to Elastic tape
         conn = elastic_tape.client.connect(ET_Settings.PUT_HOST, ET_Settings.PORT)
@@ -138,48 +138,27 @@ class ElasticTapeBackend(Backend):
         logging.info("Batch with id: " + str(batch_id) + " created successfully")
         return int(batch_id)
 
-    def user_has_put_permission(self, username, workspace, credentials):
-        return Backend.user_has_put_permission(self, username, workspace, credentials)
+    def user_has_put_permission(self, conn):
+        gws_permission = Backend._user_has_put_permission(
+            self, conn.jdma_user, conn.jdma_workspace.workspace
+        )
+        return gws_permission
 
-    def user_has_get_permission(self, migration, username, workspace, credentials):
-        return Backend.user_has_get_permission(self, migration, username, workspace, credentials)
+    def user_has_get_permission(self, conn):
+        gws_permission = Backend._user_has_get_permission(
+            self, conn.jdma_user, conn.jdma_workspace.workspace
+        )
+        return gws_permission
 
-    def user_has_put_quota(self, original_path, user, workspace, credentials):
+    def user_has_put_quota(self, conn):
         """Get the remaining quota for the user in the workspace"""
         return True
-        # now get the size of the original_path directory
-        # if pan_du exists then use it, otherwise use du
-        if os.path.exists(ET_Settings.PAN_DU_EXE):
-            # execute and interpret the PAN_DU_EXE command
-            try:
-                pan_du_output = subprocess.check_output([ET_Settings.PAN_DU_EXE, "-s", original_path])
-                # get the path_size in bytes from the number in pos 4 and the multiplier in pos 5
-                path_split = pan_du_output.split()
-                path_size = int(path_split[4]) * get_size_multiplier(path_split[5])
-            except:
-                raise Exception("Error with pan_du command")
-
-        else:
-            # just run the normal du command
-            #try:
-            if True:
-                du_output = subprocess.check_output(["/usr/bin/du", "-s", original_path])
-                # get the path size from the first element of the split string
-                path_size = int(du_output.split()[0])
-            else:
-            #except:
-                raise Exception("Error with du command")
-
-        return quota_remaining > path_size
-
 
     def get_name(self):
         return "Elastic Tape"
 
-
     def get_id(self):
         return "elastictape"
-
 
     def required_credentials(self):
         """Get the keys of the required credentials to use this backend.
@@ -187,7 +166,6 @@ class ElasticTapeBackend(Backend):
            They will be encrypted and stored in the MigrationRequest so that the daemon processes can carry
            out the Migrations on behalf of the user."""
         return []
-
 
     def minimum_object_size(self):
         """Minimum recommend size for elastic tape = 1GB? (check with Kev O'Neil)"""

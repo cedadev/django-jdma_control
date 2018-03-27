@@ -83,9 +83,9 @@ def get_completed_gets():
     for gr in get_reqs:
         # get the name of the target directory (same for each archive in a
         # migration)
-        verify_dir = os.path.join(
-            OS_Settings.VERIFY_DIR,
-            "verify_{}".format(gr.migration.external_id)
+        staging_dir = os.path.join(
+            OS_Settings.ARCHIVE_STAGING_DIR,
+            "{}".format(gr.migration.external_id)
         )
         n_completed_archives = 0
         # loop over each archive in the migration
@@ -96,7 +96,7 @@ def get_completed_gets():
         for archive in archive_set:
             # form the filepath
             archive_name = archive.get_id() + ".tar"
-            tar_file_path = os.path.join(verify_dir, archive_name)
+            tar_file_path = os.path.join(staging_dir, archive_name)
             # check for existance first
             if os.path.exists(tar_file_path):
                 # now check for size
@@ -108,6 +108,41 @@ def get_completed_gets():
         if n_completed_archives == len(archive_set):
             completed_GETs.append(gr.migration.external_id)
     return completed_GETs
+
+
+def get_completed_deletes():
+    """Get all the completed deletes for the ObjectStore"""
+    # avoiding a circular dependency
+    from jdma_control.models import MigrationRequest, Migration, StorageQuota
+    # get the storage id
+    storage_id = StorageQuota.get_storage_index("objectstore")
+    # get the decrypt key
+    key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
+
+    # list of completed DELETEs to return
+    completed_DELETEs = []
+    # now loop over the PUT requests
+    del_reqs = MigrationRequest.objects.filter(
+        (Q(request_type=MigrationRequest.DELETE))
+        & Q(stage=MigrationRequest.DELETING)
+        & Q(migration__storage__storage=storage_id)
+    )
+    for dr in del_reqs:
+        # decrypt the credentials
+        credentials = AES_tools.AES_decrypt_dict(key, dr.credentials)
+        try:
+            # create a connection to the object store
+            s3c = boto3.client("s3", endpoint_url=OS_Settings.S3_ENDPOINT,
+                               aws_access_key_id=credentials['access_key'],
+                               aws_secret_access_key=credentials['secret_key'])
+            # if the bucket has been deleted then the deletion has completed
+            buckets = s3c.list_buckets()
+            if ('Buckets' not in buckets
+                 or dr.migration.external_id not in buckets['Buckets']):
+                completed_DELETEs.append(dr.migration.external_id)
+        except Exception as e:
+            raise Exception(e)
+    return completed_DELETEs
 
 
 class ObjectStoreBackend(Backend):
@@ -136,9 +171,10 @@ class ObjectStoreBackend(Backend):
         try:
             completed_PUTs = get_completed_puts()
             completed_GETs = get_completed_gets()
+            completed_DELETEs = get_completed_deletes()
         except Exception as e:
             raise Exception(e)
-        return completed_PUTs, completed_GETs
+        return completed_PUTs, completed_GETs, completed_DELETEs
 
     def create_connection(self, user, workspace, credentials):
         # create connection to Object Store, using the supplied credentials
@@ -156,9 +192,9 @@ class ObjectStoreBackend(Backend):
 
     def create_download_batch(self, conn):
         """Do nothing for object store."""
-        return
+        return None
 
-    def close_download_batch(self, conn):
+    def close_download_batch(self, conn, batch_id):
         """Do nothing for object store."""
         return
 
@@ -219,6 +255,19 @@ class ObjectStoreBackend(Backend):
         object_name = os.path.basename(archive)
         conn.upload_file(archive, batch_id, object_name)
 
+    def create_delete_batch(self, conn):
+        """Do nothing on the object store"""
+        return None
+
+    def close_delete_batch(self, conn, batch_id):
+        """Delete the bucket when the batch is deleted"""
+        conn.delete_bucket(Bucket=batch_id)
+
+    def delete(self, conn, batch_id, archive):
+        """Delete a single tarred archive of files from the object store"""
+        object_name = os.path.basename(archive)
+        conn.delete_object(Bucket=batch_id, Key=object_name)
+
     def user_has_put_permission(self, conn):
         """Check whether the user has permission (via their access_key and
         secret_key) to access the object store, and whether they have
@@ -238,7 +287,7 @@ class ObjectStoreBackend(Backend):
             s3_permission = False
         return gws_permission & s3_permission
 
-    def user_has_get_permission(self, conn):
+    def user_has_get_permission(self, batch_id, conn):
         """Check whether the user has permission (via their access_key and
         secret_key) to access the object store, and whether they have
         permission from the groupworkspace
@@ -256,11 +305,32 @@ class ObjectStoreBackend(Backend):
             s3_permission = False
         return gws_permission & s3_permission
 
-    def user_has_put_quota(self, conn, filelist):
-        """Get the remaining quota for the user in the workspace.
-        How can we do this in Object Store backend?
+    def user_has_delete_permission(self, batch_id, conn):
+        """Check whether the user has permission (via their access_key and
+        secret_key) to delete the object from the object store, and whether they
+        have permission from the groupworkspace LDAP.
         """
-        return True
+        # check from the groupworkspace
+        gws_permission = Backend._user_has_delete_permission(
+            self, conn.jdma_user, conn.jdma_workspace.workspace, batch_id
+        )
+        return gws_permission
+
+    def user_has_put_quota(self, conn):
+        """Check the remaining quota for the user in the workspace.
+        We just check the database here, i.e. check that we are not over
+        quota.
+        When jdma_lock calculates the file sizes we can check the quota again
+        and flag the transfer as FAILED if it goes over the quota.
+        """
+        from jdma_control.models import StorageQuota
+        # get the storage id
+        storage_id = StorageQuota.get_storage_index("objectstore")
+        storage_quota = StorageQuota.objects.filter(
+            storage=storage_id,
+            workspace__workspace=conn.jdma_workspace
+        )[0]
+        return storage_quota.quota_used < storage_quota.quota_size
 
     def get_name(self):
         return "Object Store"

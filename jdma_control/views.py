@@ -408,8 +408,8 @@ class MigrationRequestView(View):
                 data["date"] = req.date.isoformat()
             # add the failure reason if failed
             if (req.stage == MigrationRequest.FAILED and
-                    req.migration.failure_reason != ""):
-                data["failure_reason"] = req.migration.failure_reason
+                    req.failure_reason != ""):
+                data["failure_reason"] = req.failure_reason
         else:
             # return details of all the migration requests for this user
             keyargs = {"user__name": request.GET.get("name")}
@@ -440,6 +440,37 @@ class MigrationRequestView(View):
         return HttpResponse(json.dumps(data), content_type="application/json")
 
 
+    def _check_backend(self, JDMA_BACKEND_OBJECT, storage_name, credentials):
+        """Do the checks on the backend.  This occurs for the PUT, GET, MIGRATE,
+        and DELETE stages so have a common function."""
+        #   3a. check that the backend exists
+        # not found, return error
+        if JDMA_BACKEND_OBJECT is None:
+            error_data["error"] = (
+                "External storage: {} does not exist"
+            ).format(storage_name)
+            return HttpError(error_data, status=404)
+
+        if not JDMA_BACKEND_OBJECT.check_credentials_supplied(credentials):
+            required_credentials = JDMA_BACKEND_OBJECT.required_credentials()
+            error_data["error"] = (
+                "Required credentials for: {} not supplied  Required"
+                "credentials for: {} are: {}.  Supplied credentials: {}."
+            ).format(storage_name, storage_name,
+                     ", ".join(required_credentials),
+                     str(credentials.keys()))
+            return HttpError(error_data, status=404)
+
+        # 3a. Check that the named backend is available
+        if not JDMA_BACKEND_OBJECT.available(credentials):
+            error_data["error"] = (
+                "External storage: {} not available.  "
+                "Please see service anouncements and retry later"
+            ).format(data["storage"])
+            return HttpError(error_data, status=404)
+        return None
+
+
     def post(self, request, *args, **kwargs):
         """:rest-api
 
@@ -468,8 +499,17 @@ class MigrationRequestView(View):
         # get the json formatted data
         data = request.read()
         data = json.loads(data)
+
         # copy data to error_data
         error_data = data
+
+        # get the credentials and remove from any data that might be removed
+        if "credentials" in data:
+            credentials = data["credentials"]
+            data["credentials"] = {}
+            error_data["credentials"] = {}
+        else:
+            credentials = {}
 
         if "name" not in data:
             error_data["error"] = "No name supplied"
@@ -490,7 +530,7 @@ class MigrationRequestView(View):
             return HttpError(error_data)
 
         # check request type is "GET", "PUT"
-        if not data["request_type"] in ["GET", "PUT", "MIGRATE"]:
+        if not data["request_type"] in MigrationRequest.REQUEST_MAP:
             error_data["error"] = "Invalid request method"
             return HttpError(error_data)
 
@@ -511,8 +551,8 @@ class MigrationRequestView(View):
         # now choose what to do based on the request
         if data["request_type"] == "GET":
             # checks
-            #   1. Check that the request id is supplied
-            #   2. Check that the request exists
+            #   1. Check that the batch id is supplied
+            #   2. Check that the batch exists
             #   3a. Check that the backend exists
             #   3b. Check that the request belongs to the group workspace
             #   4. Check that the stage is ON_STORAGE
@@ -524,69 +564,49 @@ class MigrationRequestView(View):
             #      directory
             #   9. Check there is enough space on disk
 
-            #   1. check request id is supplied
+            #   1. check batch id is supplied
             if "migration_id" not in data:
                 error_data["error"] = "No batch id supplied"
                 return HttpError(error_data)
 
-            #   2. check request id exists
+            #   2. check batch id exists
             try:
-                mig = Migration.objects.get(pk=data["migration_id"])
+                migration = Migration.objects.get(pk=data["migration_id"])
             except Exception:
                 error_data["error"] = "Batch not found"
                 return HttpError(error_data)
 
-            #   3a. check that the backend exists
-            storage_name = StorageQuota.get_storage_name(mig.storage.storage)
+            #  3. check the backend
+            storage_name = StorageQuota.get_storage_name(migration.storage.storage)
             JDMA_BACKEND_OBJECT = \
                 jdma_control.backends.Backend.get_backend_object(storage_name)
-            # not found, return error
-            if JDMA_BACKEND_OBJECT is None:
-                error_data["error"] = (
-                    "External storage: {} does not exist"
-                ).format(storage_name)
-                return HttpError(error_data, status=404)
+            backend_error = self._check_backend(
+                JDMA_BACKEND_OBJECT,
+                storage_name, credentials
+            )
+            if backend_error is not None:
+                return backend_error
 
-            # check whether the credentials are supplied, return error if not
-            if "credentials" in data:
-                credentials = data["credentials"]
-            else:
-                credentials = {}
-
-            if not JDMA_BACKEND_OBJECT.check_credentials_supplied(credentials):
-                required_credentials = JDMA_BACKEND_OBJECT.required_credentials()
-                error_data["error"] = (
-                    "Required credentials for: {} not supplied  Required"
-                    "credentials for: {} are: {}.  Supplied credentials: {}."
-                ).format(storage_name, storage_name,
-                         ", ".join(required_credentials),
-                         str(credentials.keys()))
-                return HttpError(error_data, status=404)
-
-            # 3a. Check that the named backend is available
-            if not JDMA_BACKEND_OBJECT.available(credentials):
-                error_data["error"] = (
-                    "External storage: {} not available.  "
-                    "Please see service anouncements and retry later"
-                ).format(data["storage"])
-                return HttpError(error_data, status=404)
             # create a connection to the backend using the credentials
             conn = JDMA_BACKEND_OBJECT.create_connection(
                 user.name,
-                mig.workspace,
+                migration.workspace,
                 credentials
             )
             #   3b. check that the migration belongs to the user, or has group
             #   or universal permission
-            if not JDMA_BACKEND_OBJECT.user_has_get_permission(conn):
+            if not JDMA_BACKEND_OBJECT.user_has_get_permission(
+                data["migration_id"],
+                conn
+            ):
                 error_data["error"] = (
-                    "User {} does not have permission to request the batch"
-                ).format(user.name)
+                    "User {} does not have permission to request batch {}"
+                ).format(user.name, data["migration_id"])
                 return HttpError(error_data)
 
             #   4. check that the stage is ON_STORAGE
-            if mig.stage != Migration.ON_STORAGE:
-                mig_stage = Migration.STAGE_CHOICES[mig.stage][1]
+            if migration.stage != Migration.ON_STORAGE:
+                mig_stage = Migration.STAGE_CHOICES[migration.stage][1]
                 error_data["error"] = (
                     "Batch stage is: {}.  Cannot retrieve (GET) until"
                     "stage is ON_STORAGE"
@@ -595,7 +615,7 @@ class MigrationRequestView(View):
 
             # We don't need to create a migration as we're operating on an
             # existing one - assign it
-            migration_request.migration = mig
+            migration_request.migration = migration
 
             #   5. check the user has permission to write to the target directory
             # get the target dir
@@ -607,14 +627,14 @@ class MigrationRequestView(View):
 
             #   6. check if this is a duplicate
             dup_req = MigrationRequest.objects.filter(
-                migration=mig,
+                migration=migration,
                 target_path=target_path,
-                pk=mig.pk
+                pk=migration.pk
             )
             if len(dup_req) != 0:
                 error_data["error"] = (
-                    "Duplicate GET request made: Batch ID: {}, Target path: {}"
-                ).format(mig.external_id, target_path)
+                    "Duplicate GET request made: batch: {}, Target path: {}"
+                ).format(data["migration_id"], target_path)
                 return HttpError(error_data, status=403)
 
             #   7. check the target path exists
@@ -657,13 +677,10 @@ class MigrationRequestView(View):
             migration_request.save()
             # build the return data
             return_data = data
-            return_data["request_id"] = migration_request.pk
-            return_data["batch_id"] = migration_request.migration.external_id
-            return_data["request_type"] = migration_request.request_type
-            return_data["workspace"] = migration_request.migration.workspace.workspace
-            return_data["stage"] =  migration_request.stage
-            return_data["registered_date"] = migration_request.date.isoformat()
-            return_data["label"] = migration_request.migration.label
+            return_data["filelist"] = migration.filelist
+
+            # build the return data - just target path is uncommon
+            return_data = data
             return_data["target_path"] = target_path
 
         elif data["request_type"] == "PUT" or data["request_type"] == "MIGRATE":
@@ -737,7 +754,6 @@ class MigrationRequestView(View):
             if error:
                 return HttpError(error_data)
 
-
             # 2. check that the user has write permissions for each file or
             # directory in the file list
             for f in data["filelist"]:
@@ -752,43 +768,16 @@ class MigrationRequestView(View):
             if error:
                 return HttpError(error_data)
 
-            # 3. check that the named backend exists
-            JDMA_BACKEND_OBJECT = jdma_control.backends.Backend.get_backend_object(
-                data["storage"]
+            # 3, 3a, 3b check the backend
+            JDMA_BACKEND_OBJECT = \
+                jdma_control.backends.Backend.get_backend_object(data["storage"])
+            backend_error = self._check_backend(
+                JDMA_BACKEND_OBJECT,
+                data["storage"],
+                credentials
             )
-            # not found, return error
-            if JDMA_BACKEND_OBJECT is None:
-                error_data["error"] = (
-                    "External storage: {} does not exist"
-                ).format(data["storage"])
-                return HttpError(error_data, status=404)
-
-            # check whether the credentials are supplied, return error if not
-            if "credentials" in data:
-                credentials = data["credentials"]
-            else:
-                credentials = {}
-
-            if not JDMA_BACKEND_OBJECT.check_credentials_supplied(credentials):
-                error_data["error"] = (
-                    "Required credentials for: {} not supplied.  Required "
-                    "credentials for {} are: {}.  Supplied credentials: {}."
-                ).format(
-                    data["storage"],
-                    data["storage"],
-                    ", ".join(required_credentials,
-                    str(credentials.keys()))
-                )
-                return HttpError(error_data, status=404)
-
-
-            # 3a. Check that the named backend is available
-            if not JDMA_BACKEND_OBJECT.available(credentials):
-                error_data["error"] = (
-                    "External storage: {} not available.  "
-                    "Please see service anouncements and retry later"
-                ).format(data["storage"])
-                return HttpError(error_data, status=404)
+            if backend_error is not None:
+                return backend_error
 
             # get the storage quota
             storage_qs = StorageQuota.objects.filter(
@@ -812,8 +801,8 @@ class MigrationRequestView(View):
             # 4. check group workspace permission
             if not JDMA_BACKEND_OBJECT.user_has_put_permission(conn):
                 error_data["error"] = (
-                    "User {} does not have write permissions or the workspace {}"
-                    " does not exist for {}"
+                    "User: {} does not have write permissions or the workspace:"
+                    " {} does not exist for external storage: {}"
                 ).format(
                     data["name"],
                     data["workspace"],
@@ -822,18 +811,14 @@ class MigrationRequestView(View):
                 return HttpError(error_data, status=403)
 
             # 5. check quota ** TO DO ** implement this function!
-            if "filelist" in data:
-                put_quota = JDMA_BACKEND_OBJECT.user_has_put_quota(
-                    conn,
-                    data["filelist"]
-                )
-            else:
-                put_quota = False
-
-            if not put_quota:
+            if not JDMA_BACKEND_OBJECT.user_has_put_quota(conn):
                 error_data["error"] = (
-                    "Insufficient remaining quota for {}"
-                ).format(JDMA_BACKEND_OBJECT.get_name())
+                    "User: {} has insufficient quota remaining for workspace:"
+                    " {} for external storage: {}"
+                ).format(
+                    data["name"],
+                    data["workspace"],
+                    JDMA_BACKEND_OBJECT.get_name())
                 return HttpError(error_data, status=403)
 
             # All the checks have passed, so we can now add the request to the
@@ -874,18 +859,92 @@ class MigrationRequestView(View):
 
             migration_request.save()
 
-            # build the return data
+            # build the return data - just filelist is uncommon data
             return_data = data
-            return_data["request_id"] = migration.pk
-            return_data["request_type"] = migration_request.request_type
-            return_data["storage"] = StorageQuota.get_storage_name(
-                migration.storage.storage
-            )
-            return_data["stage"] = migration.stage
-            return_data["registered_date"] = migration.registered_date.isoformat()
-            return_data["label"] = migration.label
             return_data["filelist"] = migration.filelist
             # don't return the credentials!
+
+        elif data["request_type"] == "DELETE":
+            # delete a migration / batch
+            # Follow this procedure:
+            # 3, 3a, 3b check the backend exists and is available
+
+            #   1. check batch id is supplied
+            if "migration_id" not in data:
+                error_data["error"] = "No batch id supplied"
+                return HttpError(error_data)
+
+            #   2. check batch id exists
+            try:
+                migration = Migration.objects.get(pk=data["migration_id"])
+            except Exception:
+                error_data["error"] = "Batch not found"
+                return HttpError(error_data)
+
+            #   3. check the backend exists and is available
+            JDMA_BACKEND_OBJECT = \
+                jdma_control.backends.Backend.get_backend_object(data["storage"])
+            backend_error = self._check_backend(
+                JDMA_BACKEND_OBJECT,
+                data["storage"],
+                credentials
+            )
+            if backend_error is not None:
+                return backend_error
+
+            # create a connection to the backend using the credentials
+            conn = JDMA_BACKEND_OBJECT.create_connection(
+                user.name,
+                migration.workspace,
+                credentials
+            )
+
+            # check that the user has delete permission
+            if not JDMA_BACKEND_OBJECT.user_has_delete_permission(
+                data["migration_id"],
+            conn):
+                error_data["error"] = (
+                    "User {} does not have permission to delete batch: {}"
+                ).format(user.name, data["migration_id"])
+                return HttpError(error_data)
+
+            # We don't need to create a migration as we're deleting an
+            # existing one - assign it
+            migration_request.migration = migration
+
+            #   6. check if this is a duplicate
+            dup_req = MigrationRequest.objects.filter(
+                migration=migration,
+                request_type=MigrationRequest.DELETE,
+            )
+            if len(dup_req) != 0:
+                error_data["error"] = (
+                    "Duplicate DELETE request made: batch: {}"
+                ).format(data["migration_id"])
+                return HttpError(error_data, status=403)
+
+            # assign the stages
+            migration_request.stage = MigrationRequest.DELETE_START
+            # credentials - we encrypt these using AES EAX mode
+            key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
+            migration_request.credentials = AES_tools.AES_encrypt_dict(
+                key, credentials
+            )
+            migration_request.save()
+            # build the return data - all common for delete
+            return_data = data
+
+        # common return data
+        return_data["request_id"] = migration_request.pk
+        return_data["request_type"] = migration_request.request_type
+        return_data["batch_id"] = migration.pk
+        return_data["workspace"] = migration_request.migration.workspace.workspace
+        return_data["storage"] = StorageQuota.get_storage_name(
+            migration.storage.storage
+        )
+        return_data["stage"] = migration_request.stage
+        return_data["registered_date"] = migration.registered_date.isoformat()
+        return_data["label"] = migration.label
 
         return HttpResponse(json.dumps(return_data),
                             content_type="application/json")
@@ -908,18 +967,24 @@ class MigrationView(View):
         # return details of a single request
         if "migration_id" in request.GET:
             # get the keywords
-            keyargs = {"pk": int(request.GET.get("migration_id")),
-                       "user__name": request.GET.get("name")}
+            keyargs = {"pk": int(request.GET.get("migration_id"))}
             if "workspace" in request.GET:
                 workspace = request.GET.get("workspace")
-                keyargs["workspace"] = Groupworkspace.objects.filter(
-                    workspace=workspace
-                )[0]
+                # get the workspace object
+                gws = Groupworkspace.objects.filter(workspace=workspace)
+                if len(gws) == 0:
+                    error_data = {"error": "Workspace not found.",
+                                  "migration_id": keyargs["pk"],
+                                  "name": keyargs["user__name"]}
+                    error_data["workspace"] = workspace
+                    return HttpError(error_data)
+                else:
+                    keyargs["workspace"] = gws[0]
             else:
                 workspace = None
 
             try:
-                mig = Migration.objects.get(**keyargs)
+                migration = Migration.objects.get(**keyargs)
             except Exception:
                 # return error as easily interpreted JSON
                 error_data = {"error": "Batch not found.",
@@ -930,35 +995,41 @@ class MigrationView(View):
                 return HttpError(error_data)
 
             # full details - these are all the required fields
-            data = {"migration_id": mig.id, "user": mig.user.name,
-                    "workspace": mig.workspace.workspace,
-                    "label": mig.label,
-                    "stage": mig.stage,
+            data = {"migration_id": migration.id,
+                    "user": migration.user.name,
+                    "workspace": migration.workspace.workspace,
+                    "label": migration.label,
+                    "stage": migration.stage,
                     "storage": StorageQuota.get_storage_name(
-                        mig.storage.storage
+                        migration.storage.storage
                     )}
             # add the optional data if it's there
-            if mig.external_id:
-                data["external_id"] = mig.external_id
-            if mig.registered_date:
-                data["registered_date"] = mig.registered_date.isoformat()
+            if migration.external_id:
+                data["external_id"] = migration.external_id
+            if migration.registered_date:
+                data["registered_date"] = migration.registered_date.isoformat()
             #if mig.tags:
             #    data["tags"] = mig.tags
-            if mig.filelist:
-                data["filelist"] = mig.filelist
-            if mig.stage == Migration.FAILED and mig.failure_reason != "":
-                data["failure_reason"] = mig.failure_reason
+            if migration.filelist:
+                data["filelist"] = migration.filelist
+            if migration.stage == Migration.FAILED and migration.failure_reason != "":
+                data["failure_reason"] = migration.failure_reason
         else:
             # return details of all the migrations for this user
             keyargs = {"user__name": request.GET.get("name")}
             if "workspace" in request.GET:
                 workspace = request.GET.get("workspace")
-                keyargs["workspace"] = Groupworkspace.objects.filter(
-                    workspace=workspace
-                )[0]
+                # get the workspace object
+                gws = Groupworkspace.objects.filter(workspace=workspace)
+                if len(gws) == 0:
+                    error_data = {"error": "Workspace not found.",
+                                  "name": keyargs["user__name"]}
+                    error_data["workspace"] = workspace
+                    return HttpError(error_data)
+                else:
+                    keyargs["workspace"] = gws[0]
             else:
                 workspace = None
-
             try:
                 migs = Migration.objects.filter(**keyargs)
             except Exception:
@@ -1107,8 +1178,7 @@ class MigrationFileView(View):
         if workspace != None:
             keyargs["workspace"] = workspace
 
-#        try:
-        if True:
+        try:
             # get the migrations
             mig_data = []
             migrations = Migration.objects.filter(**keyargs)
@@ -1121,7 +1191,7 @@ class MigrationFileView(View):
                                   "storage" : StorageQuota.get_storage_name(
                                       mig.storage.storage
                                   )}
-                archives = mig.migrationarchive_set.all()
+                archives = migration.migrationarchive_set.all()
                 # return data
                 archive_data = []
                 for archive in archives:
@@ -1154,8 +1224,7 @@ class MigrationFileView(View):
                 mig_data.append(mig_data_local)
 
             data = {"migrations" : mig_data}
-        else:
-#        except Exception:
+        except Exception:
             # return error as easily interpreted JSON
             error_data = {"error": "Batch not found.",
                           "migration_id": mig_id,
@@ -1228,9 +1297,9 @@ class MigrationArchiveView(View):
 
                 # get the archives
                 if limit == 0:
-                    archives = mig.migrationarchive_set.all()
+                    archives = migration.migrationarchive_set.all()
                 else:
-                    archives = mig.migrationarchive_set.all()[:limit]
+                    archives = migration.migrationarchive_set.all()[:limit]
                 # return data
                 archive_data = []
                 for archive in archives:

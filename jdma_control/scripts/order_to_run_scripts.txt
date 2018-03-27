@@ -43,7 +43,14 @@ For GET requests
 15. GET_TIDY
 16. GET_COMPLETED
 
-17. FAILED
+For DELETE requests
+17. DELETE_START
+18. DELETE_PENDING
+19. DELETING
+20. DELETE_TIDY
+21. DELETE_COMPLETED
+
+22. FAILED
 
 There now follows a description of which operations are carried out when the
 machine is in a particular start, which of the daemons carries out these
@@ -57,6 +64,7 @@ script: jdma_lock ->
 tasks:
     lock the migration files (transfer ownership to root)
     create a filelist for directories
+    create the Migration
     create the MigrationFiles
     create the MigrationArchives
     assign the MigrationFiles to the MigrationArchives bases on size so that no
@@ -116,6 +124,7 @@ transition:
 script: jdma_transfer ->
 tasks:
     download the MigrationArchives to the temporary verification directory
+    close the download batch on the external storage
 transition:
     none (next transition handled in jdma_monitor)
 
@@ -184,6 +193,7 @@ transition:
 script: jdma_transfer ->
 tasks:
     download the MigrationArchives to the download staging directory
+    close the download batch on the external storage
     set last_archive to 0
 
 12a.GETTING
@@ -228,7 +238,69 @@ script: jdma_tidy ->
 tasks:
     delete the MigrationRequest
     send the email notification informing the user that the Migration has been
-    downloaded successfully
+     downloaded successfully
+transition:
+    none, the MigrationRequest has been deleted
+
+17. DELETE_START
+================
+script: jdma_lock ->
+tasks:
+    lock the Migration that is going to be deleted, so no further processing will
+     occur
+transition:
+    DELETE_START->DELETE_PENDING
+
+18. DELETE_PENDING
+==================
+script: jdma_transfer ->
+tasks:
+    create a delete batch on the external storage
+    set last_archive to 0
+transition:
+    DELETE_PENDING->DELETING
+
+19. DELETING
+============
+script: jdma_transfer ->
+tasks:
+    delete the MigrationArchives from the external storage, one by one
+     if migration.stage > PUT_PACKING
+    close the delete batch
+transition:
+    none - the next transition is handled in jdma_monitor
+
+19a. DELETING
+script: jdma_monitor ->
+tasks:
+    poll for completion of delete
+transition:
+    DELETING->DELETE_TIDY
+
+20. DELETE_TIDY
+===============
+script: jdma_tidy ->
+tasks:
+    delete any container for the batch on the external storage (e.g. bucket)
+    delete the archive files if MigrationRequest exists and stage > PUT_PACKING
+    delete the verify files if MigrationRequest exists and stage > VERIFY_PENDING
+    restore permissions on original files if request_type == PUT and / or
+     stage < PUT_TIDY
+
+transition:
+    DELETE_TIDY->DELETE_COMPLETED
+
+21. DELETE_COMPLETED
+====================
+script: jdma_tidy ->
+tasks:
+    send the email notification informing the user that the Migration has been
+     deleted successfully
+    delete the Migration (as the delete mode is set to CASCADE in the Migration
+     model, this should delete the MigrationRequest, the MigrationArchives and
+     the MigrationFiles associated with the Migration)
+    update the quota for the backend storage (add back the used space)
+    delete the DELETE MigrationRequest
 transition:
     none, the MigrationRequest has been deleted
 
@@ -275,4 +347,12 @@ In the test mode run the scripts in this order:
 8.  jdma_tidy        GET_COMPLETED->deleted
 
 
-In the deployment mode the scripts will be run by cron
+(To DELETE data)
+                    MigrationRequest.stage
+                    -----------------------
+1.  jdma_lock        DELETE_START->DELETE_PENDING
+2.  jdma_transfer    DELETE_PENDING->DELETING
+3.  jdma_transfer    (no state transition)
+4.  jdma_monitor     DELETING->DELETE_TIDY
+5.  jdma_tidy        DELETE_TIDY->DELETE_COMPLETED
+6.  jdma_tidy        DELETE_COMPLETED->deleted
