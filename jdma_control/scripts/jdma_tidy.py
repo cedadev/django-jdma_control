@@ -42,10 +42,6 @@ def get_batch_info_for_email(backend_object, migration):
     msg += (
         "    Stage\t\t\t: {}\n"
     ).format(Migration.STAGE_LIST[migration.stage])
-    # we should have at least one file in the filelist here
-    msg += (
-        "    Filelist\t: {}\n"
-    ).format(migration.formatted_filelist()[0] + "...")
     msg += (
         "    External batch id\t\t: {}\n"
     ).format(migration.external_id)
@@ -202,7 +198,7 @@ def remove_original_files(backend_object, pr):
     This will occur if request_type == MIGRATE
     This is the whole point of the migration!"""
     # loop over the files in the filelist
-    for fd in pr.migration.filelist:
+    for fd in pr.filelist:
         # check whether it's a directory: walk if it is
         if os.path.isdir(fd):
             # delete the whole directory!

@@ -35,7 +35,7 @@ def lock_migration(pr, conn):
     # loop over the files or directories - copy full paths and other info
     # about the file into a list
     fileinfos = []
-    for fd in pr.migration.filelist:
+    for fd in pr.filelist:
         # check whether it's a directory: walk if it is
         if os.path.isdir(fd):
             # create the file list of all the files and directories under
@@ -73,8 +73,10 @@ def lock_migration(pr, conn):
                     pr.migration.user.name,
                     conn
                 )
-                # append the root
-                if os.path.isdir(file_info.filepath):
+                # append the root if not in fileinfos
+                if (os.path.isdir(file_info.filepath)
+                    and file_info not in fileinfos
+                ):
                     fileinfos.append(file_info)
         else:
             # get the info for the file
@@ -329,6 +331,8 @@ def lock_delete_migrations(backend_object):
         dr.stage = MigrationRequest.DELETE_PENDING
         dr.locked = False
         dr.save()
+        dr.migration.stage = Migration.DELETING
+        dr.migration.save()
         logging.info("DELETE: Locked migration: {}".format(dr.migration.pk))
         logging.info((
             "Transition: request ID: {} GET_START->GET_PENDING"

@@ -218,14 +218,6 @@ class Migration(models.Model):
         help_text="File permissions of original common_path directory"
     )
 
-    # filelist - for uploading / downloading lists of files
-    filelist = ArrayField(
-        models.CharField(max_length=1024, unique=True, blank=True),
-        blank=True,
-        null=True,
-        help_text="List of files for uploading or downloading"
-    )
-
     # the backend external storage location of the migration
     storage = models.ForeignKey(
         StorageQuota,
@@ -243,18 +235,6 @@ class Migration(models.Model):
 
     def name(self):
         return self.__str__()
-
-    def formatted_filelist(self):
-        """Return a string of the filelist separated by linebreaks, rather than
-        commas.
-        Put the output in a Textarea widget in the Admin form
-        """
-        out_str = ""
-        if self.filelist:
-            for f in self.filelist:
-                out_str += f + "\n"
-            return out_str
-    formatted_filelist.short_description = "filelist"
 
 
 @python_2_unicode_compatible
@@ -417,6 +397,14 @@ class MigrationRequest(models.Model):
         help_text="Reason for failure of request"
     )
 
+    # filelist - for uploading / downloading lists of files
+    filelist = ArrayField(
+        models.CharField(max_length=1024, unique=True, blank=True),
+        blank=True,
+        null=True,
+        help_text="List of files for uploading or downloading"
+    )
+
     # last archive to be uploaded / downloaded successfully - this should
     # allow resumption of uploads / downloads
     last_archive = models.IntegerField(
@@ -446,7 +434,18 @@ class MigrationRequest(models.Model):
     def unlock(self):
         self.locked = False
         self.save()
-
+        
+    def formatted_filelist(self):
+        """Return a string of the filelist separated by linebreaks, rather than
+        commas.
+        Put the output in a Textarea widget in the Admin form
+        """
+        out_str = ""
+        if self.filelist:
+            for f in self.filelist:
+                out_str += f + "\n"
+            return out_str
+    formatted_filelist.short_description = "filelist"
 
 @python_2_unicode_compatible
 class MigrationArchive(models.Model):

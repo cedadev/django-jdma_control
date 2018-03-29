@@ -406,6 +406,9 @@ class MigrationRequestView(View):
                     "stage": req.stage}
             if req.date:
                 data["date"] = req.date.isoformat()
+            if req.filelist:
+                data["filelist"] = req.filelist
+
             # add the failure reason if failed
             if (req.stage == MigrationRequest.FAILED and
                     req.failure_reason != ""):
@@ -445,6 +448,7 @@ class MigrationRequestView(View):
         and DELETE stages so have a common function."""
         #   3a. check that the backend exists
         # not found, return error
+        error_data = {}
         if JDMA_BACKEND_OBJECT is None:
             error_data["error"] = (
                 "External storage: {} does not exist"
@@ -466,7 +470,7 @@ class MigrationRequestView(View):
             error_data["error"] = (
                 "External storage: {} not available.  "
                 "Please see service anouncements and retry later"
-            ).format(data["storage"])
+            ).format(JDMA_BACKEND_OBJECT.get_id())
             return HttpError(error_data, status=404)
         return None
 
@@ -677,7 +681,7 @@ class MigrationRequestView(View):
             migration_request.save()
             # build the return data
             return_data = data
-            return_data["filelist"] = migration.filelist
+            return_data["filelist"] = migration_request.filelist
 
             # build the return data - just target path is uncommon
             return_data = data
@@ -712,7 +716,7 @@ class MigrationRequestView(View):
             # check that there is not already an entry with this exact same
             # filelist
             # get the first file
-            if Migration.objects.filter(filelist=data["filelist"]):
+            if MigrationRequest.objects.filter(filelist=data["filelist"]):
                 error_data["error"] = (
                     "Filelist or directory {}... is already in a migration"
                 ).format(data["filelist"][0])
@@ -837,9 +841,6 @@ class MigrationRequestView(View):
             # get the date
             migration.registered_date = cdate
 
-            # assign the filelist
-            migration.filelist = data["filelist"]
-
             # external storage
             migration.storage = storage_qs[0]
 
@@ -856,12 +857,14 @@ class MigrationRequestView(View):
             migration_request.credentials = AES_tools.AES_encrypt_dict(
                 key, credentials
             )
+            # assign the filelist
+            migration_request.filelist = data["filelist"]
 
             migration_request.save()
 
             # build the return data - just filelist is uncommon data
             return_data = data
-            return_data["filelist"] = migration.filelist
+            return_data["filelist"] = migration_request.filelist
             # don't return the credentials!
 
         elif data["request_type"] == "DELETE":
@@ -964,7 +967,7 @@ class MigrationView(View):
         if "name" not in request.GET:
             return HttpError({"error": "No name supplied."})
 
-        # return details of a single request
+        # return details of a single batch
         if "migration_id" in request.GET:
             # get the keywords
             keyargs = {"pk": int(request.GET.get("migration_id"))}
@@ -1008,10 +1011,6 @@ class MigrationView(View):
                 data["external_id"] = migration.external_id
             if migration.registered_date:
                 data["registered_date"] = migration.registered_date.isoformat()
-            #if mig.tags:
-            #    data["tags"] = mig.tags
-            if migration.filelist:
-                data["filelist"] = migration.filelist
             if migration.stage == Migration.FAILED and migration.failure_reason != "":
                 data["failure_reason"] = migration.failure_reason
         else:
@@ -1087,18 +1086,6 @@ class MigrationView(View):
 
         if "label" in data and data["label"] == "":
             error_data["error"] = "No label supplied."
-            return HttpError(error_data)
-
-        if "permission" in data and data["permission"] == "":
-            error_data["error"] = "No permission supplied."
-            return HttpError(error_data)
-
-        if "permission" in data and not data["permission"] in [
-           "ALL", "PRIVATE", "GROUP"
-        ]:
-            error_data["error"] = (
-                "Permission has to be one of ALL | PRIVATE | GROUP"
-            )
             return HttpError(error_data)
 
         # try to get the migration request
@@ -1191,7 +1178,7 @@ class MigrationFileView(View):
                                   "storage" : StorageQuota.get_storage_name(
                                       mig.storage.storage
                                   )}
-                archives = migration.migrationarchive_set.all()
+                archives = mig.migrationarchive_set.all()
                 # return data
                 archive_data = []
                 for archive in archives:
@@ -1224,13 +1211,14 @@ class MigrationFileView(View):
                 mig_data.append(mig_data_local)
 
             data = {"migrations" : mig_data}
-        except Exception:
+        except Exception as e:
             # return error as easily interpreted JSON
             error_data = {"error": "Batch not found.",
                           "migration_id": mig_id,
                           "name": user_name}
             if workspace:
                 error_data["workspace"] = workspace.workspace
+            raise Exception(e)
             return HttpError(error_data)
 
         return HttpResponse(json.dumps(data), content_type="application/json")
@@ -1297,9 +1285,9 @@ class MigrationArchiveView(View):
 
                 # get the archives
                 if limit == 0:
-                    archives = migration.migrationarchive_set.all()
+                    archives = mig.migrationarchive_set.all()
                 else:
-                    archives = migration.migrationarchive_set.all()[:limit]
+                    archives = mig.migrationarchive_set.all()[:limit]
                 # return data
                 archive_data = []
                 for archive in archives:
