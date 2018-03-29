@@ -32,10 +32,10 @@ class MigrationAdmin(admin.ModelAdmin):
     list_filter = ('stage', 'registered_date', 'workspace')
 
     fields = ('user', 'label', 'workspace', 'stage', 'storage',
-              'external_id', 'registered_date', 'formatted_filelist',
+              'external_id', 'registered_date',
               'common_path', 'common_path_user_id', 'common_path_group_id',
               'common_path_permission')
-    readonly_fields = ('formatted_filelist', 'storage', 'external_id',
+    readonly_fields = ('storage', 'external_id',
                        'common_path', 'common_path_user_id',
                        'common_path_group_id', 'common_path_permission')
 
@@ -52,9 +52,9 @@ class MigrationRequestAdmin(admin.ModelAdmin):
 
     fields = ('user', 'request_type', 'stage', 'date', 'migration',
               'target_path', 'credentials', 'last_archive', 'failure_reason',
-              'locked')
+              'formatted_filelist', 'locked')
     readonly_fields = ('migration', 'credentials', 'last_archive',
-                       'failure_reason')
+                       'failure_reason', 'formatted_filelist')
     search_fields = ('user',)
 admin.site.register(MigrationRequest, MigrationRequestAdmin)
 
