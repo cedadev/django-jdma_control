@@ -7,7 +7,6 @@ from collections import namedtuple
 
 from jasmin_ldap.query import *
 import jdma_site.settings as settings
-from jdma_control.models import Migration, MigrationRequest
 
 FileInfo = namedtuple('FileInfo',
                       ['filepath', 'size', 'digest', 'unix_user_id',
@@ -103,6 +102,7 @@ def get_file_info_tuple(filepath, user_name, conn):
 
 
 def mark_migration_failed(mig_req, failure_reason, upload_mig=True):
+    from jdma_control.models import Migration, MigrationRequest
     logging.error(failure_reason)
     mig_req.stage = MigrationRequest.FAILED
     mig_req.failure_reason = failure_reason
@@ -115,6 +115,7 @@ def mark_migration_failed(mig_req, failure_reason, upload_mig=True):
         #mig_req.migration.external_id = None
         mig_req.migration.save()
     mig_req.save()
+
 
 def sizeof_fmt(num):
     """Human friendly file size"""
@@ -131,3 +132,28 @@ def sizeof_fmt(num):
         return '1 byte'
     else:
         return '0 bytes'
+
+
+def get_archive_set_from_get_request(gr):
+    # if the filelist for the GET request is not None then we have to determine
+    # which archives to download
+    from jdma_control.models import MigrationArchive
+    if gr.filelist:
+        # remove the common path from the filelist
+        filelist_no_cp = [x.replace(gr.migration.common_path, "")
+                           for x in gr.filelist]
+        # find the archives for this migration containing the entries in
+        # filelist_no_cp
+        archive_set = MigrationArchive.objects.filter(
+            migration=gr.migration,
+            migrationfile__path__in=filelist_no_cp
+        ).order_by('pk')
+        st_arch = gr.last_archive
+        n_arch = archive_set.count()
+    else:
+        # start at the last_archive so that interrupted uploads can be resumed
+        st_arch = gr.last_archive
+        arch_set_query = gr.migration.migrationarchive_set
+        n_arch = arch_set_query.count()
+        archive_set = arch_set_query.order_by('pk')
+    return archive_set, st_arch, n_arch

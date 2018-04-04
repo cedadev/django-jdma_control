@@ -15,6 +15,7 @@ from jdma_control.models import Migration, MigrationRequest
 from jdma_control.models import StorageQuota
 from jdma_control.scripts.jdma_lock import setup_logging, calculate_digest
 from jdma_control.scripts.jdma_transfer import mark_migration_failed
+from jdma_control.scripts.common import get_archive_set_from_get_request
 import jdma_control.backends
 
 
@@ -125,7 +126,8 @@ def put_packing(backend_object):
             mark_migration_failed(pr, error_string)
 
 
-def unpack_archive(archive_staging_dir, archive, external_id, target_path):
+def unpack_archive(archive_staging_dir, archive, external_id,
+                   target_path, filelist=None):
     """Unpack a tar file containing the files that are in the
        MigrationArchive object"""
     # create the directory path for the batch (external_id)
@@ -156,24 +158,43 @@ def unpack_archive(archive_staging_dir, archive, external_id, target_path):
             "Digest does not match for archive: {}"
         ).format(archive_path)
         raise Exception(error_string)
-    tar_file.extractall(target_path)
+
+    # untar each file
+    for tar_info in tar_file.getmembers():
+        try:
+            # if filelist only extract those in the filelist
+            if filelist:
+                if tar_info.name in filelist:
+                    tar_file.extract(tar_info, path=target_path)
+            else:
+                tar_file.extract(tar_info, path=target_path)
+            logging.info((
+                "    Extracting file: {} from archive: {} to directory: {}"
+            ).format(tar_info.name, archive.get_id(), target_path))
+        except Exception as e:
+            error_string = (
+                "Could not extract file: {} from archive {} to path: {}, exception: {}"
+            ).format(tar_info.name, archive.get_id(), target_path, str(e))
+            logging.error(error_string)
+            raise Exception(error_string)
+
     tar_file.close()
 
 
 def unpack_request(gr, archive_staging_dir):
     """Unpack a single request.  This has been split out so we can
     parallelise later"""
-    # start at the last_archive so that interrupted unpacking can be resumed
-    st_arch = gr.last_archive
-    n_arch = gr.migration.migrationarchive_set.count()
-    # get the archive set here as it might change if we get it in the loop
-    archive_set = gr.migration.migrationarchive_set.order_by('pk')
+
+    archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
+
+    # loop over the archives
     for arch_num in range(st_arch, n_arch):
         # determine which archive to stage (tar) and upload
         archive = archive_set[arch_num]
         unpack_archive(archive_staging_dir, archive,
                        gr.migration.external_id,
-                       gr.target_path)
+                       gr.target_path,
+                       gr.filelist)
         # update the last good archive
         gr.last_archive += 1
         gr.save()

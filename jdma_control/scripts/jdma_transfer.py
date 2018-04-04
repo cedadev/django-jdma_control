@@ -17,12 +17,13 @@ from jasmin_ldap.core import *
 from jasmin_ldap.query import *
 
 import jdma_site.settings as settings
-from jdma_control.models import Migration, MigrationRequest
+from jdma_control.models import Migration, MigrationRequest, MigrationArchive
 from jdma_control.models import StorageQuota
 import jdma_control.backends
 import jdma_control.backends.AES_tools as AES_tools
 from jdma_control.scripts.common import mark_migration_failed, setup_logging
 from jdma_control.scripts.common import calculate_digest
+from jdma_control.scripts.common import get_archive_set_from_get_request
 
 def start_upload(backend_object, credentials, pr):
     # check we actually have some files to archive first
@@ -222,20 +223,19 @@ def start_download(backend_object, gr):
         raise(e)
 
 
-def download_batch(backend_object, credentials, pr):
+def download_batch(backend_object, credentials, gr):
     """Download the archives files in the GET request to the STAGING_DIR."""
     # open a connection to the backend.  Creating the connection can account
     # for a significant portion of the run time.  So we only do it once!
     conn = backend_object.create_connection(
-        pr.migration.user.name,
-        pr.migration.workspace.workspace,
+        gr.migration.user.name,
+        gr.migration.workspace.workspace,
         credentials
     )
+    # if the filelist for the GET request is not None then we have to determine
+    # which archives to download
+    archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
 
-    # start at the last_archive so that interrupted uploads can be resumed
-    st_arch = pr.last_archive
-    n_arch = pr.migration.migrationarchive_set.count()
-    archive_set = pr.migration.migrationarchive_set.order_by('pk')
     for arch_num in range(st_arch, n_arch):
         # determine which archive to download and stage (tar)
         archive = archive_set[arch_num]
@@ -243,55 +243,35 @@ def download_batch(backend_object, credentials, pr):
             # get the name of the target directory
             staging_dir = os.path.join(
                 backend_object.ARCHIVE_STAGING_DIR,
-                "{}".format(pr.migration.external_id)
+                "{}".format(gr.migration.external_id)
             )
             # use Backend.get to pull back the files to a temporary directory
             logging.info((
                 "Downloading for unarchiving: {}"
-            ).format(pr.migration.external_id))
+            ).format(gr.migration.external_id))
 
             # get the object name and download
             archive_name = archive.get_id() + ".tar"
             backend_object.get(
                 conn,
-                pr.migration.external_id,
+                gr.migration.external_id,
                 archive_name,
                 staging_dir
             )
             # update the last good archive
-            pr.last_archive += 1
-            pr.save()
+            gr.last_archive += 1
+            gr.save()
         except Exception as e:
             raise(e)
 
         # the archive has been downloaded to the staging directory
-        # now unarchive it to the target directory
-        try:
-            # get the path of the staged tarfile
-            tarfile_path = os.path.join(staging_dir, archive_name)
-            # open the tarfile in read only
-            tar_file = TarFile(tarfile_path, mode='r')
-            # untar each file
-            for tar_info in tar_file.getmembers():
-                tar_file.extract(tar_info, path=pr.target_path)
-                logging.info((
-                    "    Extracting file: {} from staged archive: {} to"
-                    " directory: {}"
-                ).format(tar_info.name, tarfile_path, pr.target_path))
-            tar_file.close()
-
-        except Exception as e:
-            error_string = (
-                "Could not add file: {} to archive: {}, exception: {}"
-            ).format(mf.path, stage_path, str(e))
-            logging.error(error_string)
-            raise Exception(error_string)
+        # jdma_pack will unarchive it to the target directory
 
     # close the batch on the external storage - for ET this will trigger the
     # transport
     backend_object.close_download_batch(
         conn,
-        pr.migration.external_id
+        gr.migration.external_id
     )
     # close the connection to the backend
     backend_object.close_connection(conn)
@@ -431,6 +411,10 @@ def restore_owner_and_group(backend_object, gr, conn):
                 gr.target_path,
                 mig_file.path
             )
+
+            # check whether there is a filelist and if this file is part of it
+            if gr.filelist and mig_file.path not in gr.filelist:
+                continue
 
             # change the directory owner / group
             subprocess.call(
