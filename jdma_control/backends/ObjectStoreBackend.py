@@ -17,6 +17,7 @@ from django.db.models import Q
 from jdma_control.backends.Backend import Backend
 from jdma_control.backends import ObjectStoreSettings as OS_Settings
 from jdma_control.backends import AES_tools
+from jdma_control.scripts.common import get_archive_set_from_get_request
 import jdma_site.settings as settings
 
 def get_completed_puts():
@@ -66,7 +67,7 @@ def get_completed_puts():
 
 def get_completed_gets():
     # avoiding a circular dependency
-    from jdma_control.models import MigrationRequest, StorageQuota
+    from jdma_control.models import MigrationRequest, StorageQuota, MigrationArchive
     # get the storage id
     storage_id = StorageQuota.get_storage_index("objectstore")
 
@@ -89,7 +90,10 @@ def get_completed_gets():
         )
         n_completed_archives = 0
         # loop over each archive in the migration
-        archive_set = gr.migration.migrationarchive_set.order_by('pk')
+        # if the filelist for the GET request is not None then we have to determine
+        # which archives to download
+        archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
+
         # just need to see if the archive has been downloaded to the file system
         # we know this when the file is present and the file size is equal to
         # that stored in the database

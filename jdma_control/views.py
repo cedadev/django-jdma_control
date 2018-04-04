@@ -613,7 +613,7 @@ class MigrationRequestView(View):
                 mig_stage = Migration.STAGE_CHOICES[migration.stage][1]
                 error_data["error"] = (
                     "Batch stage is: {}.  Cannot retrieve (GET) until"
-                    "stage is ON_STORAGE"
+                    " stage is ON_STORAGE"
                 ).format(mig_stage)
                 return HttpError(error_data)
 
@@ -629,11 +629,17 @@ class MigrationRequestView(View):
                 error_data["error"] = "Target path not supplied"
                 return HttpError(error_data, status=404)
 
+            #   Get the filelist
+            if "filelist" in data:
+                filelist = data["filelist"]
+            else:
+                filelist = None
+
             #   6. check if this is a duplicate
             dup_req = MigrationRequest.objects.filter(
                 migration=migration,
                 target_path=target_path,
-                pk=migration.pk
+                filelist=filelist
             )
             if len(dup_req) != 0:
                 error_data["error"] = (
@@ -670,6 +676,8 @@ class MigrationRequestView(View):
 
             # All the checks have been passed so we can now add the request to
             # the JDMA database
+            if filelist:
+                migration_request.filelist = filelist
             migration_request.target_path = target_path
             migration_request.stage = MigrationRequest.GET_START
             # credentials - we encrypt these using AES EAX mode
