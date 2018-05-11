@@ -13,10 +13,12 @@ setup(
     packages=['jdma_control'],
     install_requires=[
         'appdirs',
+        'beautifulsoup4',
         'django',
         'django-sizefield',
         'django-extensions',
         'django-multiselectfield',
+        'html5lib',
         'psycopg2-binary',
         'packaging',
         'pyparsing',

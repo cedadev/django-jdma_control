@@ -80,13 +80,12 @@ def get_completed_gets():
         & Q(migration__storage__storage=storage_id)
     )
     #
-
     for gr in get_reqs:
         # get the name of the target directory (same for each archive in a
         # migration)
         staging_dir = os.path.join(
             OS_Settings.ARCHIVE_STAGING_DIR,
-            "{}".format(gr.migration.external_id)
+            "{}".format(gr.migration.get_id())
         )
         n_completed_archives = 0
         # loop over each archive in the migration
@@ -110,7 +109,7 @@ def get_completed_gets():
         # if number completed is equal to number in archive set then the
         # transfer has completed
         if n_completed_archives == len(archive_set):
-            completed_GETs.append(gr.migration.external_id)
+            completed_GETs.append(gr.transfer_id)
     return completed_GETs
 
 
@@ -180,7 +179,7 @@ class ObjectStoreBackend(Backend):
             raise Exception(e)
         return completed_PUTs, completed_GETs, completed_DELETEs
 
-    def create_connection(self, user, workspace, credentials):
+    def create_connection(self, user, workspace, credentials, mode="upload"):
         # create connection to Object Store, using the supplied credentials
         s3c = boto3.client("s3", endpoint_url=OS_Settings.S3_ENDPOINT,
                            aws_access_key_id=credentials['access_key'],
@@ -194,24 +193,26 @@ class ObjectStoreBackend(Backend):
         """
         return
 
-    def create_download_batch(self, conn):
+    def create_download_batch(self, conn, external_id, file_list=[], target_dir=""):
         """Do nothing for object store."""
-        return None
+        return external_id
 
-    def close_download_batch(self, conn, batch_id):
+    def close_download_batch(self, conn, transfer_id):
         """Do nothing for object store."""
         return
 
-    def get(self, conn, batch_id, archive, target_dir):
+    def get(self, conn, transfer_id, archive, target_dir):
         """Download a batch of files from the Object Store to a target
         directory.
         """
         # get the last part of the filepath
         object_name = os.path.basename(archive)
         download_file_path = os.path.join(target_dir, object_name)
-        conn.download_file(batch_id, object_name, download_file_path)
+        print(transfer_id, object_name, download_file_path)
+        conn.download_file(transfer_id, object_name, download_file_path)
+        return 1
 
-    def create_upload_batch(self, conn):
+    def create_upload_batch(self, conn, batch_name="", file_list=[]):
         """Create a batch on the object store and return the batch id.
         For the object store the batch id is the groupworkspace name appended
         with the next batch number for that groupworkspace.
@@ -258,6 +259,7 @@ class ObjectStoreBackend(Backend):
         # get the last part of the filepath
         object_name = os.path.basename(archive)
         conn.upload_file(archive, batch_id, object_name)
+        return 1
 
     def create_delete_batch(self, conn):
         """Do nothing on the object store"""

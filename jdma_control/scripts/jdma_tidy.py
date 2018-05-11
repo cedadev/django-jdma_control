@@ -1,11 +1,5 @@
 """Functions to tidy up after the JDMA has migrated data to external storage.
-   It will do the following:
-   1.  Delete the verification directory and all its contents
-   2.  Delete the file list in /jdma_file_lists
-   3.  Delete the digest in /jdma_file_lists
-   4.  Delete the original directory and all its contents (!)
-   5.  Remove the migration request (but leave the migration)
-   Running this will not change the state of any of the migrations.
+   A notification email will be sent on GET / PUT completion.
 """
 
 import os
@@ -177,7 +171,8 @@ def remove_archive_files(backend_object, pr):
 
 
 def remove_verification_files(backend_object, pr):
-    """Remove those temporary files that have been created in the verification step"""
+    """Remove those temporary files that have been created in the verification
+    step"""
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # get the directory that the temporary files are in
     batch_id = pr.migration.external_id

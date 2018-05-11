@@ -1,8 +1,8 @@
 """Functions to verify files that have been migrated to external storage.
-   These files have been put on external storage and then (temporarily) pulled back to
-   disk before being verified by calculating the SHA256 digest and comparing it
-   to the digest that was calculated (in jdma_transfer) before it was uploaded
-   to external storage.
+   These files have been put on external storage and then (temporarily) pulled
+   back to disk before being verified by calculating the SHA256 digest and
+   comparing it to the digest that was calculated (in jdma_transfer) before it
+   was uploaded to external storage.
    Running this will change the state of the migrations:
      VERIFYING->ON_STORAGE
 """
@@ -16,6 +16,7 @@ from django.db.models import Q
 from jdma_control.models import Migration, MigrationRequest, StorageQuota
 from jdma_control.scripts.jdma_lock import setup_logging, calculate_digest
 from jdma_control.scripts.jdma_transfer import mark_migration_failed
+from jdma_control.scripts.jdma_transfer import get_verify_dir
 import jdma_control.backends
 
 def get_permissions_string(p):
@@ -48,10 +49,7 @@ def verify_files(backend_object):
         # get the batch id
         external_id = pr.migration.external_id
         # get the temporary directory
-        verify_dir = os.path.join(
-            backend_object.VERIFY_DIR,
-            "verify_{}".format(pr.migration.external_id)
-        )
+        verify_dir = get_verify_dir(backend_object, pr)
         # loop over the MigrationArchives that belong to this Migration
         archive_set = pr.migration.migrationarchive_set.order_by('pk')
         # use last_archive to enable restart of verification

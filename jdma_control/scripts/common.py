@@ -101,11 +101,11 @@ def get_file_info_tuple(filepath, user_name, conn):
     )
 
 
-def mark_migration_failed(mig_req, failure_reason, upload_mig=True):
+def mark_migration_failed(mig_req, failure_reason, e_inst=None, upload_mig=True):
     from jdma_control.models import Migration, MigrationRequest
     logging.error(failure_reason)
     mig_req.stage = MigrationRequest.FAILED
-    mig_req.failure_reason = failure_reason
+    mig_req.failure_reason = str(failure_reason)
     # lock the migration request so it can't be retried
     mig_req.locked = True
     # only reset these if the upload migration (PUT | MIGRATE) fails
@@ -115,6 +115,10 @@ def mark_migration_failed(mig_req, failure_reason, upload_mig=True):
         #mig_req.migration.external_id = None
         mig_req.migration.save()
     mig_req.save()
+    # raise exception if debug
+    debug = True
+    if debug and e_inst != None:
+        raise Exception(e_inst)
 
 
 def sizeof_fmt(num):

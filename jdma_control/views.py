@@ -462,7 +462,7 @@ class MigrationRequestView(View):
                 "credentials for: {} are: {}.  Supplied credentials: {}."
             ).format(storage_name, storage_name,
                      ", ".join(required_credentials),
-                     str(credentials.keys()))
+                     str(credentials))
             return HttpError(error_data, status=404)
 
         # 3a. Check that the named backend is available
@@ -554,396 +554,409 @@ class MigrationRequestView(View):
         # Note: 08/12/2017: permissions are now handled by the Backend
         # now choose what to do based on the request
         if data["request_type"] == "GET":
-            # checks
-            #   1. Check that the batch id is supplied
-            #   2. Check that the batch exists
-            #   3a. Check that the backend exists
-            #   3b. Check that the request belongs to the group workspace
-            #   4. Check that the stage is ON_STORAGE
-            #   5. Check the user has permission to write to the target
-            #      directory (or original path if not set)
-            #   6. Check whether this is a duplicate
-            #   7. Check that the target path exists
-            #   8. Check that the user has permission to write to the target
-            #      directory
-            #   9. Check there is enough space on disk
-
-            #   1. check batch id is supplied
-            if "migration_id" not in data:
-                error_data["error"] = "No batch id supplied"
-                return HttpError(error_data)
-
-            #   2. check batch id exists
             try:
-                migration = Migration.objects.get(pk=data["migration_id"])
-            except Exception:
-                error_data["error"] = "Batch not found"
+                # checks
+                #   1. Check that the batch id is supplied
+                #   2. Check that the batch exists
+                #   3a. Check that the backend exists
+                #   3b. Check that the request belongs to the group workspace
+                #   4. Check that the stage is ON_STORAGE
+                #   5. Check the user has permission to write to the target
+                #      directory (or original path if not set)
+                #   6. Check whether this is a duplicate
+                #   7. Check that the target path exists
+                #   8. Check that the user has permission to write to the target
+                #      directory
+                #   9. Check there is enough space on disk
+
+                #   1. check batch id is supplied
+                if "migration_id" not in data:
+                    error_data["error"] = "No batch id supplied"
+                    return HttpError(error_data)
+
+                #   2. check batch id exists
+                try:
+                    migration = Migration.objects.get(pk=data["migration_id"])
+                except Exception:
+                    error_data["error"] = "Batch not found"
+                    return HttpError(error_data)
+
+                #  3. check the backend
+                storage_name = StorageQuota.get_storage_name(migration.storage.storage)
+                JDMA_BACKEND_OBJECT = \
+                    jdma_control.backends.Backend.get_backend_object(storage_name)
+                backend_error = self._check_backend(
+                    JDMA_BACKEND_OBJECT,
+                    storage_name, credentials
+                )
+                if backend_error is not None:
+                    return backend_error
+
+                # create a connection to the backend using the credentials
+                conn = JDMA_BACKEND_OBJECT.create_connection(
+                    user.name,
+                    migration.workspace,
+                    credentials
+                )
+                #   3b. check that the migration belongs to the user, or has group
+                #   or universal permission
+                if not JDMA_BACKEND_OBJECT.user_has_get_permission(
+                    data["migration_id"],
+                    conn
+                ):
+                    error_data["error"] = (
+                        "User {} does not have permission to request batch {}"
+                    ).format(user.name, data["migration_id"])
+                    return HttpError(error_data)
+
+                #   4. check that the stage is ON_STORAGE
+                if migration.stage != Migration.ON_STORAGE:
+                    mig_stage = Migration.STAGE_CHOICES[migration.stage][1]
+                    error_data["error"] = (
+                        "Batch stage is: {}.  Cannot retrieve (GET) until"
+                        " stage is ON_STORAGE"
+                    ).format(mig_stage)
+                    return HttpError(error_data)
+
+                # We don't need to create a migration as we're operating on an
+                # existing one - assign it
+                migration_request.migration = migration
+
+                #   5. check the user has permission to write to the target directory
+                # get the target dir
+                if "target_path" in data:
+                    target_path = data["target_path"]
+                else:
+                    error_data["error"] = "Target path not supplied"
+                    return HttpError(error_data, status=404)
+
+                #   Get the filelist
+                if "filelist" in data:
+                    filelist = data["filelist"]
+                else:
+                    filelist = None
+
+                #   6. check if this is a duplicate
+                dup_req = MigrationRequest.objects.filter(
+                    migration=migration,
+                    target_path=target_path,
+                    filelist=filelist
+                )
+                if len(dup_req) != 0:
+                    error_data["error"] = (
+                        "Duplicate GET request made: batch: {}, Target path: {}"
+                    ).format(data["migration_id"], target_path)
+                    return HttpError(error_data, status=403)
+
+                #   7. check the target path exists
+                base_path = os.path.dirname(target_path)
+                if not os.path.exists(base_path):
+                    error_data["error"] = (
+                        "Parent of target path {}" + target_path + " does not"
+                        "exist: {}"
+                    ).format(target_path, + str(base_path))
+                    return HttpError(error_data, status=403)
+
+                #   8. check the user has permission to write to the directory
+                if not user_has_write_permission(base_path, data["name"]):
+                    error_data["error"] = (
+                        "User {} does not have write permission to the directory: {}"
+                    ).format(data["name"], str(target_path))
+                    return HttpError(error_data, status=403)
+
+                #   9. Check there is enough space on disk
+                retrieval_size = 0
+                if not user_has_sufficient_diskspace(
+                    base_path, data["name"],
+                    retrieval_size
+                ): # implement this function
+                    error_data["error"] = (
+                        "Insufficient diskspace for the retrieval (GET) {}"
+                    ).format(str(target_path))
+                    return HttpError(error_data, status=403)
+
+                # All the checks have been passed so we can now add the request to
+                # the JDMA database
+                if filelist:
+                    migration_request.filelist = filelist
+                migration_request.target_path = target_path
+                migration_request.stage = MigrationRequest.GET_START
+                # credentials - we encrypt these using AES EAX mode
+                key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
+                migration_request.credentials = AES_tools.AES_encrypt_dict(
+                    key, credentials
+                )
+
+                migration_request.save()
+                # build the return data
+                return_data = data
+                return_data["filelist"] = migration_request.filelist
+
+                # build the return data - just target path is uncommon
+                return_data = data
+                return_data["target_path"] = target_path
+
+            except Exception as e:
+                error_data["error"] = str(e)
                 return HttpError(error_data)
-
-            #  3. check the backend
-            storage_name = StorageQuota.get_storage_name(migration.storage.storage)
-            JDMA_BACKEND_OBJECT = \
-                jdma_control.backends.Backend.get_backend_object(storage_name)
-            backend_error = self._check_backend(
-                JDMA_BACKEND_OBJECT,
-                storage_name, credentials
-            )
-            if backend_error is not None:
-                return backend_error
-
-            # create a connection to the backend using the credentials
-            conn = JDMA_BACKEND_OBJECT.create_connection(
-                user.name,
-                migration.workspace,
-                credentials
-            )
-            #   3b. check that the migration belongs to the user, or has group
-            #   or universal permission
-            if not JDMA_BACKEND_OBJECT.user_has_get_permission(
-                data["migration_id"],
-                conn
-            ):
-                error_data["error"] = (
-                    "User {} does not have permission to request batch {}"
-                ).format(user.name, data["migration_id"])
-                return HttpError(error_data)
-
-            #   4. check that the stage is ON_STORAGE
-            if migration.stage != Migration.ON_STORAGE:
-                mig_stage = Migration.STAGE_CHOICES[migration.stage][1]
-                error_data["error"] = (
-                    "Batch stage is: {}.  Cannot retrieve (GET) until"
-                    " stage is ON_STORAGE"
-                ).format(mig_stage)
-                return HttpError(error_data)
-
-            # We don't need to create a migration as we're operating on an
-            # existing one - assign it
-            migration_request.migration = migration
-
-            #   5. check the user has permission to write to the target directory
-            # get the target dir
-            if "target_path" in data:
-                target_path = data["target_path"]
-            else:
-                error_data["error"] = "Target path not supplied"
-                return HttpError(error_data, status=404)
-
-            #   Get the filelist
-            if "filelist" in data:
-                filelist = data["filelist"]
-            else:
-                filelist = None
-
-            #   6. check if this is a duplicate
-            dup_req = MigrationRequest.objects.filter(
-                migration=migration,
-                target_path=target_path,
-                filelist=filelist
-            )
-            if len(dup_req) != 0:
-                error_data["error"] = (
-                    "Duplicate GET request made: batch: {}, Target path: {}"
-                ).format(data["migration_id"], target_path)
-                return HttpError(error_data, status=403)
-
-            #   7. check the target path exists
-            base_path = os.path.dirname(target_path)
-            if not os.path.exists(base_path):
-                error_data["error"] = (
-                    "Parent of target path {}" + target_path + " does not"
-                    "exist: {}"
-                ).format(target_path, + str(base_path))
-                return HttpError(error_data, status=403)
-
-            #   8. check the user has permission to write to the directory
-            if not user_has_write_permission(base_path, data["name"]):
-                error_data["error"] = (
-                    "User {} does not have write permission to the directory: {}"
-                ).format(data["name"], str(target_path))
-                return HttpError(error_data, status=403)
-
-            #   9. Check there is enough space on disk
-            retrieval_size = 0
-            if not user_has_sufficient_diskspace(
-                base_path, data["name"],
-                retrieval_size
-            ): # implement this function
-                error_data["error"] = (
-                    "Insufficient diskspace for the retrieval (GET) {}"
-                ).format(str(target_path))
-                return HttpError(error_data, status=403)
-
-            # All the checks have been passed so we can now add the request to
-            # the JDMA database
-            if filelist:
-                migration_request.filelist = filelist
-            migration_request.target_path = target_path
-            migration_request.stage = MigrationRequest.GET_START
-            # credentials - we encrypt these using AES EAX mode
-            key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
-            migration_request.credentials = AES_tools.AES_encrypt_dict(
-                key, credentials
-            )
-
-            migration_request.save()
-            # build the return data
-            return_data = data
-            return_data["filelist"] = migration_request.filelist
-
-            # build the return data - just target path is uncommon
-            return_data = data
-            return_data["target_path"] = target_path
 
         elif data["request_type"] == "PUT" or data["request_type"] == "MIGRATE":
-            # check workspace is in request
-            if not "workspace" in data:
-                error_data["error"] = "No workspace supplied"
-                return HttpError(error_data)
+            try:
+                # check workspace is in request
+                if not "workspace" in data:
+                    error_data["error"] = "No workspace supplied"
+                    return HttpError(error_data)
 
-            # check that the workspace is known and has a quota
-            workspace_qs = Groupworkspace.objects.filter(
-                workspace=data["workspace"]
-            )
-            if len(workspace_qs) == 0:
-                error_data["error"] = (
-                    "Workspace {} has no associated groupworkspace quota set"
-                ).format(data["workspace"])
-                return HttpError(error_data)
-
-            # check that filelist is supplied
-            if "filelist" not in data:
-                error_data["error"] = "No directory path or filelist supplied"
-                return HttpError(error_data)
-
-            # check that the filelist is not empty
-            if len(data["filelist"]) == 0:
-                error_data["error"] = "Filelist is empty"
-                return HttpError(error_data)
-
-            # check that there is not already an entry with this exact same
-            # filelist
-            # get the first file
-            if MigrationRequest.objects.filter(filelist=data["filelist"]):
-                error_data["error"] = (
-                    "Filelist or directory {}... is already in a migration"
-                ).format(data["filelist"][0])
-                return HttpError(error_data)
-
-            # check for the label in the request - if not then derive from
-            # filelist
-            if "label" in data:
-                label = data["label"]
-            else:
-                label = data["filelist"][0].split("/")[-1]
-
-            # check the storage is in the request
-            if "storage" not in data:
-                error_data["error"] = (
-                    "External storage not specified in PUT / MIGRATE request"
+                # check that the workspace is known and has a quota
+                workspace_qs = Groupworkspace.objects.filter(
+                    workspace=data["workspace"]
                 )
-                return HttpError(error_data)
+                if len(workspace_qs) == 0:
+                    error_data["error"] = (
+                        "Workspace {} has no associated groupworkspace quota set"
+                    ).format(data["workspace"])
+                    return HttpError(error_data)
 
-            # five checks:
-            #   1. Check the path exists (obvs.) or that each path in the
-            #      filelist exists
-            #   2. Check the user has write permission to the directory or each
-            #      of the files
-            #   3. Check that the backend exists and that the
-            #      required_credentials were supplied
-            #   4. Check user has write permission in group workspace
-            #   5. Check the user has enough space in their storage quota
+                # check that filelist is supplied
+                if "filelist" not in data:
+                    error_data["error"] = "No directory path or filelist supplied"
+                    return HttpError(error_data)
 
-            # 1. check that the path exists
-            # check that each file in the filelist exists or is a directory
-            error = False
-            for f in data["filelist"]:
+                # check that the filelist is not empty
+                if len(data["filelist"]) == 0:
+                    error_data["error"] = "Filelist is empty"
+                    return HttpError(error_data)
+
+                # check that there is not already an entry with this exact same
+                # filelist
+                # get the first file
+                if MigrationRequest.objects.filter(filelist=data["filelist"]):
+                    error_data["error"] = (
+                        "Filelist or directory {}... is already in a migration"
+                    ).format(data["filelist"][0])
+                    return HttpError(error_data)
+
+                # check for the label in the request - if not then derive from
+                # filelist
+                if "label" in data:
+                    label = data["label"]
+                else:
+                    label = data["filelist"][0].split("/")[-1]
+
+                # check the storage is in the request
+                if "storage" not in data:
+                    error_data["error"] = (
+                        "External storage not specified in PUT / MIGRATE request"
+                    )
+                    return HttpError(error_data)
+
+                # five checks:
+                #   1. Check the path exists (obvs.) or that each path in the
+                #      filelist exists
+                #   2. Check the user has write permission to the directory or each
+                #      of the files
+                #   3. Check that the backend exists and that the
+                #      required_credentials were supplied
+                #   4. Check user has write permission in group workspace
+                #   5. Check the user has enough space in their storage quota
+
+                # 1. check that the path exists
+                # check that each file in the filelist exists or is a directory
                 error = False
-                error_data["error"] = ""
-                if not (os.path.isdir(f) or os.path.isfile(f)):
-                    error_data["error"] += "Path {} does not exist".format(f)
-                    error = True
-            if error:
-                return HttpError(error_data)
+                for f in data["filelist"]:
+                    error = False
+                    error_data["error"] = ""
+                    if not (os.path.isdir(f) or os.path.isfile(f)):
+                        error_data["error"] += "Path {} does not exist".format(f)
+                        error = True
+                if error:
+                    return HttpError(error_data)
 
-            # 2. check that the user has write permissions for each file or
-            # directory in the file list
-            for f in data["filelist"]:
-                error = False
-                error_data["error"] = ""
-                if not user_has_write_permission(f, data["name"]):
-                    error_data["error"] += (
-                        "User does not have write permission for "
-                        "file/directory: {}."
-                    ).format(f)
-                    error = True
-            if error:
-                return HttpError(error_data)
+                # 2. check that the user has write permissions for each file or
+                # directory in the file list
+                for f in data["filelist"]:
+                    error = False
+                    error_data["error"] = ""
+                    if not user_has_write_permission(f, data["name"]):
+                        error_data["error"] += (
+                            "User does not have write permission for "
+                            "file/directory: {}."
+                        ).format(f)
+                        error = True
+                if error:
+                    return HttpError(error_data)
 
-            # 3, 3a, 3b check the backend
-            JDMA_BACKEND_OBJECT = \
-                jdma_control.backends.Backend.get_backend_object(data["storage"])
-            backend_error = self._check_backend(
-                JDMA_BACKEND_OBJECT,
-                data["storage"],
-                credentials
-            )
-            if backend_error is not None:
-                return backend_error
-
-            # get the storage quota
-            storage_qs = StorageQuota.objects.filter(
-                workspace=workspace_qs[0],
-                storage=StorageQuota.get_storage_index(data["storage"])
-            )
-            if len(storage_qs) == 0:
-                error_data["error"] = (
-                    "External storage: {} has not been attached "
-                    "to the groupworkspace: {}"
-                ).format(data["storage"], data["workspace"])
-                return HttpError(error_data, status=404)
-
-            # create a connection to the backend using the credentials
-            conn = JDMA_BACKEND_OBJECT.create_connection(
-                user.name,
-                workspace_qs[0],
-                credentials
-            )
-
-            # 4. check group workspace permission
-            if not JDMA_BACKEND_OBJECT.user_has_put_permission(conn):
-                error_data["error"] = (
-                    "User: {} does not have write permissions or the workspace:"
-                    " {} does not exist for external storage: {}"
-                ).format(
-                    data["name"],
-                    data["workspace"],
-                    JDMA_BACKEND_OBJECT.get_name()
+                # 3, 3a, 3b check the backend
+                JDMA_BACKEND_OBJECT = \
+                    jdma_control.backends.Backend.get_backend_object(data["storage"])
+                backend_error = self._check_backend(
+                    JDMA_BACKEND_OBJECT,
+                    data["storage"],
+                    credentials
                 )
-                return HttpError(error_data, status=403)
+                if backend_error is not None:
+                    return backend_error
 
-            # 5. check quota ** TO DO ** implement this function!
-            if not JDMA_BACKEND_OBJECT.user_has_put_quota(conn):
-                error_data["error"] = (
-                    "User: {} has insufficient quota remaining for workspace:"
-                    " {} for external storage: {}"
-                ).format(
-                    data["name"],
-                    data["workspace"],
-                    JDMA_BACKEND_OBJECT.get_name())
-                return HttpError(error_data, status=403)
+                # get the storage quota
+                storage_qs = StorageQuota.objects.filter(
+                    workspace=workspace_qs[0],
+                    storage=StorageQuota.get_storage_index(data["storage"])
+                )
+                if len(storage_qs) == 0:
+                    error_data["error"] = (
+                        "External storage: {} has not been attached "
+                        "to the groupworkspace: {}"
+                    ).format(data["storage"], data["workspace"])
+                    return HttpError(error_data, status=404)
 
-            # All the checks have passed, so we can now add the request to the
-            # JDMA database
-            # Create a Migration (all the details of the directory)
-            migration = Migration()
-            migration.user = user
+                # create a connection to the backend using the credentials
+                conn = JDMA_BACKEND_OBJECT.create_connection(
+                    user.name,
+                    workspace_qs[0],
+                    credentials
+                )
 
-            # Assign the data passed in / derived above
-            migration.label = label
-            migration.workspace = workspace_qs[0]
+                # 4. check group workspace permission
+                if not JDMA_BACKEND_OBJECT.user_has_put_permission(conn):
+                    error_data["error"] = (
+                        "User: {} does not have write permissions or the workspace:"
+                        " {} does not exist for external storage: {}"
+                    ).format(
+                        data["name"],
+                        data["workspace"],
+                        JDMA_BACKEND_OBJECT.get_name()
+                    )
+                    return HttpError(error_data, status=403)
 
-            # Assign the stage, this is always on disk at this stage for a PUT
-            migration.stage = Migration.ON_DISK
+                # 5. check quota ** TO DO ** implement this function!
+                if not JDMA_BACKEND_OBJECT.user_has_put_quota(conn):
+                    error_data["error"] = (
+                        "User: {} has insufficient quota remaining for workspace:"
+                        " {} for external storage: {}"
+                    ).format(
+                        data["name"],
+                        data["workspace"],
+                        JDMA_BACKEND_OBJECT.get_name())
+                    return HttpError(error_data, status=403)
 
-            # get the date
-            migration.registered_date = cdate
+                # All the checks have passed, so we can now add the request to the
+                # JDMA database
+                # Create a Migration (all the details of the directory)
+                migration = Migration()
+                migration.user = user
 
-            # external storage
-            migration.storage = storage_qs[0]
+                # Assign the data passed in / derived above
+                migration.label = label
+                migration.workspace = workspace_qs[0]
 
-            # save the migration to the database
-            migration.save()
+                # Assign the stage, this is always on disk at this stage for a PUT
+                migration.stage = Migration.ON_DISK
 
-            # associate the migration_request with the migration and save to
-            # the database
-            migration_request.migration = migration
-            # set the migration request to be PUT_START
-            migration_request.stage = MigrationRequest.PUT_START
-            # credentials - we encrypt these using AES EAX mode
-            key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
-            migration_request.credentials = AES_tools.AES_encrypt_dict(
-                key, credentials
-            )
-            # assign the filelist
-            migration_request.filelist = data["filelist"]
+                # get the date
+                migration.registered_date = cdate
 
-            migration_request.save()
+                # external storage
+                migration.storage = storage_qs[0]
 
-            # build the return data - just filelist is uncommon data
-            return_data = data
-            return_data["filelist"] = migration_request.filelist
-            # don't return the credentials!
+                # save the migration to the database
+                migration.save()
+
+                # associate the migration_request with the migration and save to
+                # the database
+                migration_request.migration = migration
+                # set the migration request to be PUT_START
+                migration_request.stage = MigrationRequest.PUT_START
+                # credentials - we encrypt these using AES EAX mode
+                key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
+                migration_request.credentials = AES_tools.AES_encrypt_dict(
+                    key, credentials
+                )
+                # assign the filelist
+                migration_request.filelist = data["filelist"]
+
+                migration_request.save()
+
+                # build the return data - just filelist is uncommon data
+                return_data = data
+                return_data["filelist"] = migration_request.filelist
+                # don't return the credentials!
+            except Exception as e:
+                error_data["error"] = str(e)
+                return HttpError(error_data)
 
         elif data["request_type"] == "DELETE":
-            # delete a migration / batch
-            # Follow this procedure:
-            # 3, 3a, 3b check the backend exists and is available
-
-            #   1. check batch id is supplied
-            if "migration_id" not in data:
-                error_data["error"] = "No batch id supplied"
-                return HttpError(error_data)
-
-            #   2. check batch id exists
             try:
-                migration = Migration.objects.get(pk=data["migration_id"])
-            except Exception:
-                error_data["error"] = "Batch not found"
+                # delete a migration / batch
+                # Follow this procedure:
+                # 3, 3a, 3b check the backend exists and is available
+
+                #   1. check batch id is supplied
+                if "migration_id" not in data:
+                    error_data["error"] = "No batch id supplied"
+                    return HttpError(error_data)
+
+                #   2. check batch id exists
+                try:
+                    migration = Migration.objects.get(pk=data["migration_id"])
+                except Exception:
+                    error_data["error"] = "Batch not found"
+                    return HttpError(error_data)
+
+                #   3. check the backend exists and is available
+                JDMA_BACKEND_OBJECT = \
+                    jdma_control.backends.Backend.get_backend_object(data["storage"])
+                backend_error = self._check_backend(
+                    JDMA_BACKEND_OBJECT,
+                    data["storage"],
+                    credentials
+                )
+                if backend_error is not None:
+                    return backend_error
+
+                # create a connection to the backend using the credentials
+                conn = JDMA_BACKEND_OBJECT.create_connection(
+                    user.name,
+                    migration.workspace,
+                    credentials
+                )
+
+                # check that the user has delete permission
+                if not JDMA_BACKEND_OBJECT.user_has_delete_permission(
+                    data["migration_id"],
+                conn):
+                    error_data["error"] = (
+                        "User {} does not have permission to delete batch: {}"
+                    ).format(user.name, data["migration_id"])
+                    return HttpError(error_data)
+
+                # We don't need to create a migration as we're deleting an
+                # existing one - assign it
+                migration_request.migration = migration
+
+                #   6. check if this is a duplicate
+                dup_req = MigrationRequest.objects.filter(
+                    migration=migration,
+                    request_type=MigrationRequest.DELETE,
+                )
+                if len(dup_req) != 0:
+                    error_data["error"] = (
+                        "Duplicate DELETE request made: batch: {}"
+                    ).format(data["migration_id"])
+                    return HttpError(error_data, status=403)
+
+                # assign the stages
+                migration_request.stage = MigrationRequest.DELETE_START
+                # credentials - we encrypt these using AES EAX mode
+                key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
+                migration_request.credentials = AES_tools.AES_encrypt_dict(
+                    key, credentials
+                )
+                migration_request.save()
+                # build the return data - all common for delete
+                return_data = data
+            except Exception as e:
+                error_data["error"] = str(e)
                 return HttpError(error_data)
-
-            #   3. check the backend exists and is available
-            JDMA_BACKEND_OBJECT = \
-                jdma_control.backends.Backend.get_backend_object(data["storage"])
-            backend_error = self._check_backend(
-                JDMA_BACKEND_OBJECT,
-                data["storage"],
-                credentials
-            )
-            if backend_error is not None:
-                return backend_error
-
-            # create a connection to the backend using the credentials
-            conn = JDMA_BACKEND_OBJECT.create_connection(
-                user.name,
-                migration.workspace,
-                credentials
-            )
-
-            # check that the user has delete permission
-            if not JDMA_BACKEND_OBJECT.user_has_delete_permission(
-                data["migration_id"],
-            conn):
-                error_data["error"] = (
-                    "User {} does not have permission to delete batch: {}"
-                ).format(user.name, data["migration_id"])
-                return HttpError(error_data)
-
-            # We don't need to create a migration as we're deleting an
-            # existing one - assign it
-            migration_request.migration = migration
-
-            #   6. check if this is a duplicate
-            dup_req = MigrationRequest.objects.filter(
-                migration=migration,
-                request_type=MigrationRequest.DELETE,
-            )
-            if len(dup_req) != 0:
-                error_data["error"] = (
-                    "Duplicate DELETE request made: batch: {}"
-                ).format(data["migration_id"])
-                return HttpError(error_data, status=403)
-
-            # assign the stages
-            migration_request.stage = MigrationRequest.DELETE_START
-            # credentials - we encrypt these using AES EAX mode
-            key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
-            migration_request.credentials = AES_tools.AES_encrypt_dict(
-                key, credentials
-            )
-            migration_request.save()
-            # build the return data - all common for delete
-            return_data = data
 
         # common return data
         return_data["request_id"] = migration_request.pk
