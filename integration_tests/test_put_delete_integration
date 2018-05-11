@@ -26,14 +26,14 @@ $PWD/test_delete_migration
 
 ############################ TEST 2 ############################
 2)
-# Delete during PUT_PENDING
+# Delete during PUT_PACKING
 
 # schedule put request
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
 # run the first phase of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
 
 # schedule the DELETE request
@@ -45,17 +45,17 @@ $PWD/test_delete_migration
 
 ############################ TEST 3 ############################
 3)
-# Delete during PUT_PACKING
+# Delete during PUT_PENDING
 
 # schedule put request
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
 # run the first two phases of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
+echo "2. jdma_transfer PUT_PACKING->PUT_PENDING"
+$MANAGE runscript jdma_pack
 
 # schedule the DELETE request
 $PWD/test_delete_request $batch_id
@@ -72,13 +72,14 @@ $PWD/test_delete_migration
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
+# run the first three phases of the PUT transition
 # run the first two phases of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
-echo "3. jdma_pack PUT_PACKING->PUTTING"
+echo "2. jdma_transfer PUT_PACKING->PUT_PENDING"
 $MANAGE runscript jdma_pack
+echo "3. jdma_pack PUT_PENDING->PUTTING"
+$MANAGE runscript jdma_transfer
 
 # schedule the DELETE request
 $PWD/test_delete_request $batch_id
@@ -95,13 +96,13 @@ $PWD/test_delete_migration
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
-# run the first two phases of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+# run the first four phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
-echo "3. jdma_pack PUT_PACKING->PUTTING"
+echo "2. jdma_transfer PUT_PACKING->PUT_PENDING"
 $MANAGE runscript jdma_pack
+echo "3. jdma_pack PUT_PENDING->PUTTING"
+$MANAGE runscript jdma_transfer
 echo "4. jdma_transfer PUTTING->PUTTING"
 $MANAGE runscript jdma_transfer
 
@@ -120,13 +121,13 @@ $PWD/test_delete_migration
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
-# run the first two phases of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+# run the first five phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
-echo "3. jdma_pack PUT_PACKING->PUTTING"
+echo "2. jdma_transfer PUT_PACKING->PUT_PENDING"
 $MANAGE runscript jdma_pack
+echo "3. jdma_pack PUT_PENDING->PUTTING"
+$MANAGE runscript jdma_transfer
 echo "4. jdma_transfer PUTTING->PUTTING"
 $MANAGE runscript jdma_transfer
 echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
@@ -147,13 +148,13 @@ $PWD/test_delete_migration
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
-# run the first two phases of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+# run the first 6 phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
-echo "3. jdma_pack PUT_PACKING->PUTTING"
+echo "2. jdma_transfer PUT_PACKING->PUT_PENDING"
 $MANAGE runscript jdma_pack
+echo "3. jdma_pack PUT_PENDING->PUTTING"
+$MANAGE runscript jdma_transfer
 echo "4. jdma_transfer PUTTING->PUTTING"
 $MANAGE runscript jdma_transfer
 echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
@@ -176,13 +177,13 @@ $PWD/test_delete_migration
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
-# run the first two phases of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+# run the first 7 phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
-echo "3. jdma_pack PUT_PACKING->PUTTING"
+echo "2. jdma_transfer PUT_PACKING->PUT_PENDING"
 $MANAGE runscript jdma_pack
+echo "3. jdma_pack PUT_PENDING->PUTTING"
+$MANAGE runscript jdma_transfer
 echo "4. jdma_transfer PUTTING->PUTTING"
 $MANAGE runscript jdma_transfer
 echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
@@ -207,13 +208,13 @@ $PWD/test_delete_migration
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
-# run the first two phases of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+# run the first 8 phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
-echo "3. jdma_pack PUT_PACKING->PUTTING"
+echo "2. jdma_transfer PUT_PACKING->PUT_PENDING"
 $MANAGE runscript jdma_pack
+echo "3. jdma_pack PUT_PENDING->PUTTING"
+$MANAGE runscript jdma_transfer
 echo "4. jdma_transfer PUTTING->PUTTING"
 $MANAGE runscript jdma_transfer
 echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
@@ -240,13 +241,13 @@ $PWD/test_delete_migration
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
-# run the first two phases of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+# run the first 9 phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
-echo "3. jdma_pack PUT_PACKING->PUTTING"
+echo "2. jdma_transfer PUT_PACKING->PUT_PENDING"
 $MANAGE runscript jdma_pack
+echo "3. jdma_pack PUT_PENDING->PUTTING"
+$MANAGE runscript jdma_transfer
 echo "4. jdma_transfer PUTTING->PUTTING"
 $MANAGE runscript jdma_transfer
 echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
@@ -275,13 +276,13 @@ $PWD/test_delete_migration
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
-# run the first two phases of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+# run the first 10 phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
-echo "3. jdma_pack PUT_PACKING->PUTTING"
+echo "2. jdma_transfer PUT_PACKING->PUT_PENDING"
 $MANAGE runscript jdma_pack
+echo "3. jdma_pack PUT_PENDING->PUTTING"
+$MANAGE runscript jdma_transfer
 echo "4. jdma_transfer PUTTING->PUTTING"
 $MANAGE runscript jdma_transfer
 echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"
@@ -312,13 +313,13 @@ $PWD/test_delete_migration
 batch_id=`$PWD/test_put_request | jq '.batch_id'`
 echo $batch_id
 
-# run the first two phases of the PUT transition
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+# run the first 12 phases of the PUT transition
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
-echo "3. jdma_pack PUT_PACKING->PUTTING"
+echo "2. jdma_transfer PUT_PACKING->PUT_PENDING"
 $MANAGE runscript jdma_pack
+echo "3. jdma_pack PUT_PENDING->PUTTING"
+$MANAGE runscript jdma_transfer
 echo "4. jdma_transfer PUTTING->PUTTING"
 $MANAGE runscript jdma_transfer
 echo "4.5 jdma_monitor PUTTING->VERIFY_PENDING"

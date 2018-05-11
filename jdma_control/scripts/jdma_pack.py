@@ -15,6 +15,7 @@ from jdma_control.models import Migration, MigrationRequest
 from jdma_control.models import StorageQuota
 from jdma_control.scripts.jdma_lock import setup_logging, calculate_digest
 from jdma_control.scripts.jdma_transfer import mark_migration_failed
+from jdma_control.scripts.jdma_transfer import get_download_dir
 from jdma_control.scripts.common import get_archive_set_from_get_request
 import jdma_control.backends
 
@@ -22,14 +23,14 @@ import jdma_control.backends
 def pack_archive(archive_staging_dir, archive, pr):
     """Create a tar file containing the files that are in the
        MigrationArchive object"""
-    # external id and common_path
-    external_id = pr.migration.external_id
+    # internal id and common_path
+    internal_id = pr.migration.get_id()
     common_path = pr.migration.common_path
 
-    # create the directory path for the batch (external_id)
+    # create the directory path for the batch (internal_id)
     archive_path = os.path.join(
         archive_staging_dir,
-        external_id
+        internal_id
     )
     if not (os.path.isdir(archive_path)):
         os.makedirs(archive_path)
@@ -91,7 +92,7 @@ def pack_request(pr, archive_staging_dir):
         pr.save()
     # the request has completed so transition the request to PUTTING and reset
     # the last archive
-    pr.stage = MigrationRequest.PUTTING
+    pr.stage = MigrationRequest.PUT_PENDING
     pr.last_archive = 0
     pr.save()
 
@@ -121,24 +122,18 @@ def put_packing(backend_object):
         except Exception as e:
             error_string = (
                 "Could not pack archive for batch: {}: {}"
-            ).format(str(pr.migration.external_id), str(e))
+            ).format(pr.migration.get_id(), str(e))
             # mark the migration as failed
-            mark_migration_failed(pr, error_string)
+            mark_migration_failed(pr, error_string, e)
 
 
 def unpack_archive(archive_staging_dir, archive, external_id,
                    target_path, filelist=None):
     """Unpack a tar file containing the files that are in the
        MigrationArchive object"""
-    # create the directory path for the batch (external_id)
-    archive_path = os.path.join(
-        archive_staging_dir,
-        external_id
-    )
-
     # create the name of the archive
     archive_path = os.path.join(
-        archive_path,
+        archive_staging_dir,
         archive.get_id()) + ".tar"
     # create the target directory if it doesn't exist
     if not os.path.exists(target_path):
@@ -223,14 +218,14 @@ def get_unpacking(backend_object):
             if gr.locked:
                 continue
             gr.lock()
-            unpack_request(gr, backend_object.ARCHIVE_STAGING_DIR)
+            unpack_request(gr, get_download_dir(backend_object, gr))
             gr.unlock()
         except Exception as e:
             error_string = (
                 "Could not unpack request for batch: {}: {}"
             ).format(str(gr.migration.external_id), str(e))
             logging.error(error_string)
-            mark_migration_failed(gr, error_string, True)
+            mark_migration_failed(gr, error_string, e, upload_mig=True)
 
 
 def process(backend):

@@ -215,11 +215,11 @@ def lock_migration(pr, conn):
                  storage.quota_formatted_used(),
                  storage.quota_formatted_size(),
                  sizeof_fmt(total_size)))
-        mark_migration_failed(pr, error_string)
+        mark_migration_failed(pr, error_string, None)
     else:
-        # set the MigrationRequest stage to be PUT_PENDING and the
+        # set the MigrationRequest stage to be PUT_PACKING and the
         # Migration stage to be PUTTING
-        pr.stage = MigrationRequest.PUT_PENDING
+        pr.stage = MigrationRequest.PUT_PACKING
         pr.migration.stage = Migration.PUTTING
         pr.migration.save()
         pr.save()

@@ -66,7 +66,7 @@ class Backend(object):
         """Monitor the external storage, return which requests have completed"""
         raise NotImplementedError
 
-    def create_connection(self, user, workspace, credentials):
+    def create_connection(self, user, workspace, credentials, mode="upload"):
         """Create a connection to the backend.
         We only want to do this once per bulk transfer as establishing the
         connection can take a significant portion of the runtime.
@@ -77,21 +77,21 @@ class Backend(object):
         """Close the connection to the backend"""
         raise NotImplementedError
 
-    def create_download_batch(self, conn):
+    def create_download_batch(self, conn, external_id, file_list=[], target_dir=""):
         """Create a batch for download from the external storage and return the
         batch id"""
         raise NotImplementedError
 
-    def close_download_batch(self, conn, batch_id):
+    def close_download_batch(self, conn, transfer_id):
         """Close the download batch on the external storage"""
         raise NotImplementedError
 
-    def get(self, conn, batch_id, archive, target_dir):
+    def get(self, conn, transfer_id, archive, target_dir):
         """Get the batch from the external storage and download to a
         target_dir"""
         raise NotImplementedError
 
-    def create_upload_batch(self, conn):
+    def create_upload_batch(self, conn, batch_name="", file_list=[]):
         """Create a batch for upload to the external storage and return the
         batch id"""
         raise NotImplementedError

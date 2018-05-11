@@ -237,6 +237,11 @@ class Migration(models.Model):
         return self.__str__()
 
 
+    def get_id(self):
+        return "migration_{:08}".format(self.pk)
+
+
+
 @python_2_unicode_compatible
 class MigrationRequest(models.Model):
     """A request to upload (PUT) or retrieve (GET) a directory via the JASMIN
@@ -412,6 +417,16 @@ class MigrationRequest(models.Model):
         help_text="Last completed uploaded / downloaded archive"
     )
 
+    # transfer id for external storage - might not be neccessary for all, but
+    # required for elastic tape
+    transfer_id = models.CharField(
+        blank=True,
+        null=True,
+        max_length=1024,
+        help_text=("Tranfer id for external backup system, "
+                   "e.g. elastic tape")
+    )
+
     # whether the MigrationRequest is locked or not
     # this allows different backend storage systems to reside on different
     # servers and run multiple instances, without causing race conditions
@@ -434,7 +449,7 @@ class MigrationRequest(models.Model):
     def unlock(self):
         self.locked = False
         self.save()
-        
+
     def formatted_filelist(self):
         """Return a string of the filelist separated by linebreaks, rather than
         commas.

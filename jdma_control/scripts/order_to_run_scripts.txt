@@ -70,19 +70,10 @@ tasks:
     assign the MigrationFiles to the MigrationArchives bases on size so that no
     MigrationArchive size is less than the backends minimum object size
 transition:
-    PUT_START->PUT_PENDING
+    PUT_START->PUT_PACKING
     ON_DISK->PUTTING
 
-2.  PUT_PENDING
-===============
-script: jdma_transfer ->
-tasks:
-    create an upload batch on the external storage backend
-    set last_archive to 0
-transition:
-    PUT_PENDING->PUT_PACKING
-
-3.  PUT_PACKING
+2.  PUT_PACKING
 ===============
 script: jdma_pack -> (new script)
 tasks:
@@ -92,7 +83,16 @@ tasks:
     calculate the digests of the MigrationArchives
     set last_archive to 0
 transition:
-    PUT_PACKING->PUTTING
+    PUT_PACKING->PUT_PENDING
+
+3.  PUT_PENDING
+===============
+script: jdma_transfer ->
+tasks:
+    create an upload batch on the external storage backend
+    set last_archive to 0
+transition:
+    PUT_PENDING->PUTTING
 
 4.  PUTTING
 ===========

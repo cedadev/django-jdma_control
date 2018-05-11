@@ -1,6 +1,6 @@
-"""Functions to monitor the files in a request to (PUT) / from (GET) external storage,
-   using the backend monitor function Backend.Monitor for the backend in the request.
-   A notification email will be sent on GET / PUT completion.
+"""Functions to monitor the files in a request to (PUT) / from (GET) external
+   storage, using the backend monitor function Backend.Monitor for the backend
+   in the request.
 
    Running this will change the state of the migrations:
      PUTTING->VERIFY_PENDING
@@ -59,7 +59,7 @@ def monitor_get(completed_GETs, backend_object):
         & Q(migration__storage__storage=storage_id)
     )
     for gr in get_reqs:
-        if gr.migration.external_id in completed_GETs:
+        if gr.transfer_id in completed_GETs:
             if gr.locked:
                 continue
             gr.lock()
@@ -91,12 +91,12 @@ def monitor_verify(completed_GETs, backend_object):
     for vr in verify_reqs:
         if vr.locked:
             continue
-        if vr.migration.external_id in completed_GETs:
+        if vr.transfer_id in completed_GETs:
             vr.lock()
             vr.stage = MigrationRequest.VERIFYING
             logging.info((
                 "Transition: batch ID: {} VERIFY_GETTING->VERIFYING"
-            ).format(vr.migration.external_id))
+            ).format(vr.transfer_id))
             # reset the last archive counter
             vr.last_archive = 0
             vr.locked = False

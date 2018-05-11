@@ -5,14 +5,14 @@
 PYTHON=/home/vagrant/JDMA/venv/bin/python3.6
 MANAGE="$PYTHON $PWD/../manage.py"
 
-echo "1. jdma_lock PUT_START->PUT_PENDING"
+echo "1. jdma_lock PUT_START->PUT_PACKING"
 $MANAGE runscript jdma_lock
 
-echo "2. jdma_transfer PUT_PENDING->PUT_PACKING"
-$MANAGE runscript jdma_transfer
-
-echo "3. jdma_pack PUT_PACKING->PUTTING"
+echo "2. jdma_pack PUT_PACKING->PUT_PENDING"
 $MANAGE runscript jdma_pack
+
+echo "3. jdma_transfer PUT_PENDING->PUTTING"
+$MANAGE runscript jdma_transfer
 
 echo "4. jdma_transfer PUTTING->PUTTING"
 $MANAGE runscript jdma_transfer
