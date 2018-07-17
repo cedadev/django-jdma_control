@@ -12,6 +12,7 @@ from django.core.mail import send_mail
 
 from jdma_control.models import Migration, MigrationRequest, StorageQuota
 from jdma_control.scripts.jdma_lock import setup_logging
+from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
 
 import jdma_control.backends
 
@@ -157,11 +158,8 @@ def remove_archive_files(backend_object, pr):
     external storage"""
     # get the directory that the temporary files are in
     batch_id = pr.migration.external_id
-    # get the staging directory
-    archive_dir = os.path.join(
-        backend_object.ARCHIVE_STAGING_DIR,
-        batch_id
-    )
+    # get the untarring directory
+    archive_dir = get_download_dir(backend_object, pr)
     # remove the directory
     if os.path.isdir(archive_dir):
         shutil.rmtree(archive_dir)
@@ -177,9 +175,7 @@ def remove_verification_files(backend_object, pr):
     # get the directory that the temporary files are in
     batch_id = pr.migration.external_id
     # get the temporary directory
-    verify_dir = os.path.join(
-        backend_object.VERIFY_DIR, "verify_{}".format(batch_id)
-    )
+    verify_dir = get_verify_dir(backend_object, pr)
     # remove the directory
     if os.path.isdir(verify_dir):
         shutil.rmtree(verify_dir)
@@ -309,6 +305,8 @@ def update_storage_quota(backend, migration, update="add"):
     archive_sum = 0
     archives = migration.migrationarchive_set.all()
     for arch in archives:
+        # the size of the tar file will be the same as the individual file
+        # as the tar file is not zipped
         archive_sum += arch.size
     quota = migration.storage
     # add or delete?

@@ -36,10 +36,13 @@ def pack_archive(archive_staging_dir, archive, pr):
         os.makedirs(archive_path)
 
     # create the tar file path
-    tar_file_path = os.path.join(archive_path, archive.get_id()) + ".tar"
+    tar_file_path = os.path.join(archive_path,
+                                 archive.get_filtered_file_names()[0])
     # if the file exists then delete it!
-    if os.path.exists(tar_file_path):
+    try:
         os.unlink(tar_file_path)
+    except:
+        pass
     # create the tar file
     tar_file = TarFile(tar_file_path, mode='w')
     logging.info((
@@ -76,16 +79,20 @@ def pack_request(pr, archive_staging_dir):
     # get the archive set here as it might change if we get it in the loop
     archive_set = pr.migration.migrationarchive_set.order_by('pk')
     for arch_num in range(st_arch, n_arch):
-        # determine which archive to stage (tar) and upload
+        # determine which archive to stage (tar)
         archive = archive_set[arch_num]
         # stage the archive - i.e. create the tar file
-        archive_path = pack_archive(
-            archive_staging_dir,
-            archive,
-            pr
-        )
-        # calculate digest and add to archive
-        archive.digest = calculate_digest(archive_path)
+        # first check whether this archive is to be tarred or not
+        if archive.packed:
+            archive_path = pack_archive(
+                archive_staging_dir,
+                archive,
+                pr
+            )
+            # calculate digest and add to archive
+            archive.digest = calculate_digest(archive_path)
+        else:
+            archive.digest = "not packed"
         archive.save()
         # update the last good archive
         pr.last_archive += 1
@@ -134,23 +141,25 @@ def unpack_archive(archive_staging_dir, archive, external_id,
     # create the name of the archive
     archive_path = os.path.join(
         archive_staging_dir,
-        archive.get_id()) + ".tar"
+        archive.get_filtered_file_names()[0])
     # create the target directory if it doesn't exist
-    if not os.path.exists(target_path):
+    try:
         os.makedirs(target_path)
+    except:
+        pass
 
-    # see if the archive exists
-    if not (os.path.exists(archive_path)):
+    try:
+        tar_file = TarFile(archive_path, 'r')
+        # check that the tar_file digest matches the digest in the database
+        digest = calculate_digest(archive_path)
+        if digest != archive.digest:
+            error_string = (
+                "Digest does not match for archive: {}"
+            ).format(archive_path)
+            raise Exception(error_string)
+    except:
         error_string = (
             "Could not find archive path: {}"
-        ).format(archive_path)
-        raise Exception(error_string)
-    tar_file = TarFile(archive_path, 'r')
-    # check that the tar_file digest matches the digest in the database
-    digest = calculate_digest(archive_path)
-    if digest != archive.digest:
-        error_string = (
-            "Digest does not match for archive: {}"
         ).format(archive_path)
         raise Exception(error_string)
 
@@ -184,12 +193,13 @@ def unpack_request(gr, archive_staging_dir):
 
     # loop over the archives
     for arch_num in range(st_arch, n_arch):
-        # determine which archive to stage (tar) and upload
+        # determine which archive to unpack
         archive = archive_set[arch_num]
-        unpack_archive(archive_staging_dir, archive,
-                       gr.migration.external_id,
-                       gr.target_path,
-                       gr.filelist)
+        if archive.packed:
+            unpack_archive(archive_staging_dir, archive,
+                           gr.migration.external_id,
+                           gr.target_path,
+                           gr.filelist)
         # update the last good archive
         gr.last_archive += 1
         gr.save()
@@ -213,10 +223,10 @@ def get_unpacking(backend_object):
     # loop over the GET requests and unpack each archive
     # split into a loop so it can be parallelised later
     for gr in get_reqs:
+        # check locked
+        if gr.locked:
+            continue
         try:
-            # check locked
-            if gr.locked:
-                continue
             gr.lock()
             unpack_request(gr, get_download_dir(backend_object, gr))
             gr.unlock()

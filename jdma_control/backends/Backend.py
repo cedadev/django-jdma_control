@@ -66,6 +66,10 @@ class Backend(object):
         """Monitor the external storage, return which requests have completed"""
         raise NotImplementedError
 
+    def pack_data(self):
+        """Should the data be packed into a tarfile for this backend?"""
+        raise NotImplementedError
+
     def create_connection(self, user, workspace, credentials, mode="upload"):
         """Create a connection to the backend.
         We only want to do this once per bulk transfer as establishing the
@@ -86,7 +90,7 @@ class Backend(object):
         """Close the download batch on the external storage"""
         raise NotImplementedError
 
-    def get(self, conn, transfer_id, archive, target_dir):
+    def get(self, conn, get_req, object_name, target_dir):
         """Get the batch from the external storage and download to a
         target_dir"""
         raise NotImplementedError
@@ -100,7 +104,7 @@ class Backend(object):
         """Close the upload batch on the external storage"""
         raise NotImplementedError
 
-    def put(self, conn, batch_id, archive):
+    def put(self, conn, put_req, archive, packed=False):
         """Put a single tarred archive of files into a batch (created using
         create_batch function) on the external storage"""
         raise NotImplementedError
@@ -113,7 +117,7 @@ class Backend(object):
         """Close the delete batch on the external storage"""
         raise NotImplementedError
 
-    def delete(self, conn, batch_id, archive):
+    def delete(self, conn, del_req, archive):
         """Delete a single tarred archive of files from the external storage"""
         raise NotImplementedError
 

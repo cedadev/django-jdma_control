@@ -321,9 +321,9 @@ In the test mode run the scripts in this order:
 (should we have a JDMA transition daemon?)
                     MigrationRequest.stage
                     ----------------------
-1.  jdma_lock       PUT_START->PUT_PENDING
-2.  jdma_transfer   PUT_PENDING->PUT_PACK
-3.  jdma_pack       PUT_PACK->PUTTING
+1.  jdma_lock       PUT_START->PUT_PACKING
+3.  jdma_pack       PUT_PACKING->PUT_PENDING
+2.  jdma_transfer   PUT_PENDING->PUTTING
 4.  jdma_transfer   (no state transition)
 5.  jdma_monitor    PUTTING->VERIFY_PENDING
 6.  jdma_transfer   VERIFY_PENDING->VERIFY_GETTING

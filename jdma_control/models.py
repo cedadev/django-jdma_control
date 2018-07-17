@@ -7,6 +7,7 @@ from django.contrib.postgres.fields import HStoreField, ArrayField
 from sizefield.models import FileSizeField
 from sizefield.utils import filesizeformat
 import jdma_control.backends
+import os
 
 @python_2_unicode_compatible
 class User(models.Model):
@@ -490,6 +491,12 @@ class MigrationArchive(models.Model):
         help_text="size of file in bytes"
     )
 
+    # is the archive to be packed / is it packed?
+    packed = models.BooleanField(
+        default=False,
+        help_text="Is the archive packed (tarred)?"
+    )
+
     def name(self):
         return "Archive " + str(self.pk)
     name.short_description = "archive_name"
@@ -517,6 +524,38 @@ class MigrationArchive(models.Model):
         # get the migration
         return "Archive " + str(self.pk)
 
+    def get_file_names(self, prefix=""):
+        """Return a list of files from the archive to be / that have been uploaded.
+           If the archive is packed, then return the archive id + ".tar".
+           If the archive is not packed then return the files without the
+             common path prefix.
+           This function will return all of the files in the archive, including
+           the directories.  This is necessary, for the restore procedure, to
+           restore the permissions of the directories."""
+        if self.packed:
+            return [os.path.join(prefix, self.get_id() + ".tar")]
+        else:
+            # not packed, return a list of the files in the archive
+            return [os.path.join(prefix,
+                    f.path) for f in self.migrationfile_set.all()]
+
+    def get_filtered_file_names(self, prefix=""):
+        """Return a list of files from the archive to be / that have been uploaded.
+           If the archive is packed, then return the archive id + ".tar".
+           If the archive is not packed then return the files without the
+             common path prefix.
+           This function filters out any files which have a digest of 0 as these
+           are directories.  This list can then be used to upload to the backends.
+        """
+        if self.packed:
+            return [os.path.join(prefix, self.get_id() + ".tar")]
+        else:
+            # not packed, return a list of the files in the archive
+            file_list = []
+            for f in self.migrationfile_set.all():
+                if f.digest != "0":
+                    file_list.append(os.path.join(prefix, f.path))
+            return file_list
 
 @python_2_unicode_compatible
 class MigrationFile(models.Model):

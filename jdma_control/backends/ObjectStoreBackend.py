@@ -18,9 +18,10 @@ from jdma_control.backends.Backend import Backend
 from jdma_control.backends import ObjectStoreSettings as OS_Settings
 from jdma_control.backends import AES_tools
 from jdma_control.scripts.common import get_archive_set_from_get_request
+from jdma_control.scripts.common import get_verify_dir, get_staging_dir
 import jdma_site.settings as settings
 
-def get_completed_puts():
+def get_completed_puts(backend_object):
     """Get all the completed puts for the ObjectStore"""
     # avoiding a circular dependency
     from jdma_control.models import MigrationRequest, Migration, StorageQuota
@@ -51,23 +52,34 @@ def get_completed_puts():
             # counter for number of uploaded archives
             n_up_arch = 0
             for archive in archive_set:
-                # form the object name
-                object_name = archive.get_id() + ".tar"
-                # use head_object to check if the object is written
-                if s3c.head_object(Bucket=pr.migration.external_id,
-                                   Key=object_name):
+                # get the list of files for this archive
+                file_list = archive.get_filtered_file_names()
+                n_files = 0
+                for file_path in file_list:
+                    # object name is the file_path, without any prefix
+                    object_name = file_path
+                    try:
+                        if s3c.head_object(Bucket=pr.migration.external_id,
+                                           Key=object_name):
+                            n_files += 1
+                    except:
+                        pass
+                # check if all files uploaded and then inc archive
+                if n_files == len(file_list):
                     n_up_arch += 1
-            if n_up_arch == len(archive_set):
+            if n_up_arch == pr.migration.migrationarchive_set.count():
                 completed_PUTs.append(pr.migration.external_id)
+
         except Exception as e:
             raise Exception(e)
 
     return completed_PUTs
 
 
-def get_completed_gets():
+def get_completed_gets(backend_object):
     # avoiding a circular dependency
-    from jdma_control.models import MigrationRequest, StorageQuota, MigrationArchive
+    from jdma_control.models import MigrationRequest, StorageQuota
+    from jdma_control.models import MigrationFile, MigrationArchive
     # get the storage id
     storage_id = StorageQuota.get_storage_index("objectstore")
 
@@ -81,31 +93,51 @@ def get_completed_gets():
     )
     #
     for gr in get_reqs:
-        # get the name of the target directory (same for each archive in a
-        # migration)
-        staging_dir = os.path.join(
-            OS_Settings.ARCHIVE_STAGING_DIR,
-            "{}".format(gr.migration.get_id())
-        )
-        n_completed_archives = 0
         # loop over each archive in the migration
         # if the filelist for the GET request is not None then we have to determine
         # which archives to download
         archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
-
         # just need to see if the archive has been downloaded to the file system
         # we know this when the file is present and the file size is equal to
         # that stored in the database
+        n_completed_archives = 0
         for archive in archive_set:
+            # Determine the staging directory.  Three options:
+            # 1. The stage is VERIFY_GETTING->VERIFY DIR
+            # 2. The stage is GETTING and archive.packed->STAGING_DIR
+            # 3. The stage is GETTING and not archive.packed->target_path
             # form the filepath
-            archive_name = archive.get_id() + ".tar"
-            tar_file_path = os.path.join(staging_dir, archive_name)
-            # check for existance first
-            if os.path.exists(tar_file_path):
-                # now check for size
-                size = os.stat(tar_file_path).st_size
-                if size == archive.size:
-                    n_completed_archives += 1
+            if gr.stage == MigrationRequest.VERIFY_GETTING:
+                staging_dir = get_verify_dir(backend_object, gr)
+            elif gr.stage == MigrationRequest.GETTING:
+                if archive.packed:
+                    staging_dir = get_staging_dir(backend_object, gr)
+                else:
+                    staging_dir = gr.target_path
+            # now loop over each file in the archive
+            n_completed_files = 0
+            file_name_list = archive.get_filtered_file_names()
+            for file_name in file_name_list:
+                file_path = os.path.join(staging_dir, file_name)
+                try:
+                    # just rely on exception thown if file does not exist yet
+                    # now check for size
+                    size = os.stat(file_path).st_size
+                    # for packed archive check the archive size
+                    if archive.packed:
+                        n_completed_files += int(size == archive.size)
+                    else:
+                        # get the file from the db
+                        file_obj = MigrationFile.objects.get(
+                            path=file_name,
+                            archive=archive
+                        )
+                        n_completed_files += int(size == file_obj.size)
+                except:
+                    pass
+            # add if all files downloaded from archive
+            if n_completed_files == len(file_name_list):
+                n_completed_archives += 1
         # if number completed is equal to number in archive set then the
         # transfer has completed
         if n_completed_archives == len(archive_set):
@@ -113,7 +145,7 @@ def get_completed_gets():
     return completed_GETs
 
 
-def get_completed_deletes():
+def get_completed_deletes(backend_object):
     """Get all the completed deletes for the ObjectStore"""
     # avoiding a circular dependency
     from jdma_control.models import MigrationRequest, Migration, StorageQuota
@@ -172,12 +204,16 @@ class ObjectStoreBackend(Backend):
     def monitor(self):
         """Determine which batches have completed."""
         try:
-            completed_PUTs = get_completed_puts()
-            completed_GETs = get_completed_gets()
-            completed_DELETEs = get_completed_deletes()
+            completed_PUTs = get_completed_puts(self)
+            completed_GETs = get_completed_gets(self)
+            completed_DELETEs = get_completed_deletes(self)
         except Exception as e:
             raise Exception(e)
         return completed_PUTs, completed_GETs, completed_DELETEs
+
+    def pack_data(self):
+        """Should the data be packed into a tarfile for this backend?"""
+        return True
 
     def create_connection(self, user, workspace, credentials, mode="upload"):
         # create connection to Object Store, using the supplied credentials
@@ -201,14 +237,18 @@ class ObjectStoreBackend(Backend):
         """Do nothing for object store."""
         return
 
-    def get(self, conn, transfer_id, archive, target_dir):
+    def get(self, conn, transfer_id, object_name, target_dir):
         """Download a batch of files from the Object Store to a target
         directory.
         """
-        # get the last part of the filepath
-        object_name = os.path.basename(archive)
         download_file_path = os.path.join(target_dir, object_name)
-        print(transfer_id, object_name, download_file_path)
+        # check that the the sub path exists
+        sub_path = os.path.split(download_file_path)[0]
+        # The "it's better to ask forgiveness method!"
+        try:
+            os.makedirs(sub_path)
+        except:
+            pass
         conn.download_file(transfer_id, object_name, download_file_path)
         return 1
 
@@ -254,11 +294,18 @@ class ObjectStoreBackend(Backend):
            Not needed for object store"""
         return
 
-    def put(self, conn, batch_id, archive):
+    def put(self, conn, put_req, archive_path, packed=False):
         """Put a staged archive (with path archive) onto the Object Store"""
-        # get the last part of the filepath
-        object_name = os.path.basename(archive)
-        conn.upload_file(archive, batch_id, object_name)
+        if packed:
+            # get the last part of the path
+            path_split = os.path.split(archive_path)
+            object_name = path_split[-1]
+        else:
+            object_name = os.path.relpath(archive_path,
+                                          put_req.migration.common_path)
+        conn.upload_file(archive_path,
+                         put_req.migration.external_id,
+                         object_name)
         return 1
 
     def create_delete_batch(self, conn):
@@ -271,7 +318,7 @@ class ObjectStoreBackend(Backend):
 
     def delete(self, conn, batch_id, archive):
         """Delete a single tarred archive of files from the object store"""
-        object_name = os.path.basename(archive)
+        object_name = archive
         conn.delete_object(Bucket=batch_id, Key=object_name)
 
     def user_has_put_permission(self, conn):

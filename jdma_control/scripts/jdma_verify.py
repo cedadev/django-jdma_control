@@ -58,28 +58,39 @@ def verify_files(backend_object):
         for arch_num in range(st_arch, n_arch):
             # determine which archive to stage (tar) and upload
             archive = archive_set[arch_num]
-            # filename is concatenation of verify_dir and the the original
-            # file path
-            verify_file_path = os.path.join(
-                verify_dir,
-                archive.get_id()
-            ) + ".tar"
-            # check the file exists - if it doesn't then set the stage to
-            # FAILED and write that the file couldn't be found in the
-            # failure_reason
-            if not os.path.exists(verify_file_path):
-                failure_reason = (
-                    "VERIFY: archive {} could not be found."
-                ).format(verify_file_path)
-                mark_migration_failed(pr, failure_reason)
-                break
-            else:
-                # check that the digest matches
-                new_digest = calculate_digest(verify_file_path)
-                # check that the digests match
-                if new_digest != archive.digest:
+            # get a list of the filepaths
+            file_list = archive.get_filtered_file_names()
+            for file_path in file_list:
+                # filename is concatenation of verify_dir and the original
+                # file path
+                verify_file_path = os.path.join(
+                    verify_dir,
+                    file_path
+                )
+                try:
+                    # calculate the new digest
+                    new_digest = calculate_digest(verify_file_path)
+                    # get the stored digest - this will depend if the archive
+                    # is packed or not
+                    if archive.packed:
+                        stored_digest = archive.digest
+                    else:
+                        file_obj = MigrationFile.objects.get(path=file_path)
+                        stored_digest = file_obj.digest
+
+                    # check that the digests match
+                    if new_digest != stored_digest:
+                        failure_reason = (
+                            "VERIFY: file or archive {} has a different digest."
+                        ).format(verify_file_path)
+                        mark_migration_failed(pr, failure_reason)
+                        break
+                except:
+                    # check the file exists - if it doesn't then set the stage to
+                    # FAILED and write that the file couldn't be found in the
+                    # failure_reason
                     failure_reason = (
-                        "VERIFY: archive {} has a different digest."
+                        "VERIFY: archive {} could not be found."
                     ).format(verify_file_path)
                     mark_migration_failed(pr, failure_reason)
                     break

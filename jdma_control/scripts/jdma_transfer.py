@@ -27,18 +27,10 @@ import jdma_control.backends.AES_tools as AES_tools
 from jdma_control.scripts.common import mark_migration_failed, setup_logging
 from jdma_control.scripts.common import calculate_digest
 from jdma_control.scripts.common import get_archive_set_from_get_request
+from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
 from jdma_control.backends.ConnectionPool import ConnectionPool
 
 connection_pool = ConnectionPool()
-
-
-def get_staging_dir(backend_object, pr):
-    staging_dir = os.path.join(
-        backend_object.ARCHIVE_STAGING_DIR,
-        pr.migration.get_id()
-    )
-    return staging_dir
-
 
 def start_upload(backend_object, credentials, pr):
     # check we actually have some files to archive first
@@ -58,16 +50,19 @@ def start_upload(backend_object, credentials, pr):
             # get the archive set here and supply it to the backend object as
             # a filelist - this is for backends such as ElasticTape which
             # require the filelist at the beginning
-            # concat the directory path for the batch (internal_id)
-            archive_path = get_staging_dir(backend_object, pr)
+
             # get the archive set
             archive_set = pr.migration.migrationarchive_set.order_by('pk')
             # empty file list
             file_list = []
             for archive in archive_set:
-                # create the tar file path
-                tar_file_path = os.path.join(archive_path, archive.get_id()) + ".tar"
-                file_list.append(tar_file_path)
+                # get a list of files, using the relevant prefix
+                if archive.packed:
+                    # concat the directory path for the batch (internal_id)
+                    prefix = get_staging_dir(backend_object, pr)
+                else:
+                    prefix = pr.migration.common_path
+                file_list.extend(archive.get_filtered_file_names(prefix))
 
             external_id = backend_object.create_upload_batch(
                 conn,
@@ -116,34 +111,47 @@ def upload_batch(backend_object, credentials, pr):
     )
     st_arch = pr.last_archive
     n_arch = pr.migration.migrationarchive_set.count()
-    # create the directory path for the batch (external_id)
-    archive_path = get_staging_dir(backend_object, pr)
     # get the archive set here as it might change if we get it in the loop
     archive_set = pr.migration.migrationarchive_set.order_by('pk')
+    # loop over the archives
+    archive_inc = 0
     for arch_num in range(st_arch, n_arch):
-        # determine which archive to stage (tar) and upload
-        archive = archive_set[arch_num]
-        # upload
         try:
-            # log message
-            logging.info((
-                "Uploading file: {} to {}"
-            ).format(archive_path, backend_object.get_name()))
-            # create the tar file path
-            tar_file_path = os.path.join(archive_path, archive.get_id()) + ".tar"
+            # determine which to upload
+            archive = archive_set[arch_num]
+            # check whether the archive is packed
+            if archive.packed:
+                prefix = get_staging_dir(backend_object, pr)
+            else:
+                prefix = pr.migration.common_path
+            # get the list of files for this archive
+            file_list = archive.get_filtered_file_names(prefix)
+            # behave as if uploading each file individually
+            # get the archive to upload
+            archive = archive_set[arch_num]
+            file_inc = 0
+            for file_path in file_list:
+                if not os.path.isdir(file_path) and not os.path.islink(file_path):
+                    # log message
+                    logging.info((
+                        "Uploading file: {} to {}"
+                    ).format(file_path, backend_object.get_name()))
+                    # upload object
+                    file_inc += backend_object.put(conn, pr, file_path,
+                                                    archive.packed)
+                else:
+                    # need to fake-count the uploading of directories
+                    file_inc += 1
+            # inc archive if all files went up
+            archive_inc += int(file_inc == len(file_list))
 
-            # upload and see if last_archive needs updating
-            archive_inc = backend_object.put(
-                conn,
-                pr.migration.external_id,
-                tar_file_path,
-            )
-            # add to last archive
-            if archive_inc != 0:
-                pr.last_archive += archive_inc
-                pr.save()
         except Exception as e:
             raise Exception(e)
+
+    # add to last archive
+    if archive_inc > 0:
+        pr.last_archive += archive_inc
+        pr.save()
 
     # close the batch on the external storage - for ET this will trigger the
     # transport
@@ -155,15 +163,6 @@ def upload_batch(backend_object, credentials, pr):
     # monitoring is handled by jdma_monitor, which will transition
     # PUTTING->VERIFY_PENDING when the batch has finished uploading
 
-def get_verify_dir(backend_object, pr):
-    verify_dir = os.path.join(
-        backend_object.VERIFY_DIR,
-        "verify_{}_{}".format(
-            backend_object.get_id(),
-            pr.migration.external_id
-        )
-    )
-    return verify_dir
 
 def start_verify(backend_object, credentials, pr):
     """Start the verification process.  Transition from
@@ -182,26 +181,23 @@ def start_verify(backend_object, credentials, pr):
     # Use the Backend stored in settings.JDMA_BACKEND_OBJECT to create the
     # batch
     try:
-        # get the name of the archive path - needed for the file paths
-        archive_path = os.path.join(
-            backend_object.ARCHIVE_STAGING_DIR,
-            pr.migration.get_id()
-        )
         # get the name of the verification directory
         target_dir = get_verify_dir(backend_object, pr)
         # create the target directory if it doesn't exist
-        if not os.path.isdir(target_dir):
+        try:
             os.makedirs(target_dir)
+        except:
+            pass
 
         # for verify, we want to get the whole batch
         # get the archive set
         archive_set = pr.migration.migrationarchive_set.order_by('pk')
-        # empty file list
+
+        # add all the files in the archive to a file_list for downloading
         file_list = []
         for archive in archive_set:
-            # create the tar file path
-            tar_file_path = os.path.join(archive_path, archive.get_id()) + ".tar"
-            file_list.append(tar_file_path)
+            # get a list of files, using the relevant prefix
+            file_list.extend(archive.get_filtered_file_names())
 
         transfer_id = backend_object.create_download_batch(
             conn,
@@ -245,11 +241,12 @@ def download_to_verify(backend_object, credentials, pr):
         credentials,
         mode="download"
     )
-
     # start at the last_archive so that interrupted uploads can be resumed
     st_arch = pr.last_archive
     n_arch = pr.migration.migrationarchive_set.count()
+    # for verify, we want to get the whole archive set
     archive_set = pr.migration.migrationarchive_set.order_by('pk')
+    archive_inc = 0
     for arch_num in range(st_arch, n_arch):
         # determine which archive to stage (tar) and upload
         archive = archive_set[arch_num]
@@ -261,21 +258,25 @@ def download_to_verify(backend_object, credentials, pr):
                 "Downloading for verify: {}"
             ).format(pr.migration.external_id))
 
-            # get the object name and download, see if the last_archive needs
-            # incrementing
-            archive_name = archive.get_id() + ".tar"
-            archive_inc = backend_object.get(
-                conn,
-                pr.transfer_id,
-                archive_name,
-                verify_dir
-            )
-            # update the last good archive
-            if archive_inc != 0:
-                pr.last_archive += archive_inc
-                pr.save()
+            # get the list of files, without a prefix
+            file_list = archive.get_filtered_file_names()
+            # download each file to the staging directory
+            file_inc = 0
+            for file_path in file_list:
+                file_inc += backend_object.get(
+                    conn,
+                    pr.transfer_id,
+                    file_path,
+                    verify_dir,
+                )
+            # inc archive if all files went up
+            archive_inc += int(file_inc == len(file_list))
         except Exception as e:
             raise(e)
+    # add to last archive
+    if archive_inc > 0:
+        pr.last_archive += archive_inc
+        pr.save()
 
     # close the batch on the external storage
     backend_object.close_download_batch(
@@ -285,16 +286,6 @@ def download_to_verify(backend_object, credentials, pr):
 
     # jdma_monitor will determine when the batch has finished downloading for
     # verification and transition VERIFY_GETTING->VERIFYING
-
-def get_download_dir(backend_object, gr):
-    download_dir = os.path.join(
-        backend_object.ARCHIVE_STAGING_DIR,
-        "download_{}_{}".format(
-            backend_object.get_id(),
-            gr.migration.external_id
-        )
-    )
-    return download_dir
 
 
 def start_download(backend_object, credentials, gr):
@@ -309,25 +300,32 @@ def start_download(backend_object, credentials, gr):
     )
 
     try:
-        # get the name of the archive path - needed for the file paths
-        archive_path = os.path.join(
-            backend_object.ARCHIVE_STAGING_DIR,
-            gr.migration.get_id()
-        )
-        # get the name of the target directory
-        target_dir = get_download_dir(backend_object, gr)
-        # create the target directory if it doesn't exist
-        if not os.path.isdir(target_dir):
-            os.makedirs(target_dir)
-
         # we just (potentially) want to get a subset of archives
         archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
         # empty file list
         file_list = []
-        # create the tar file path
-        for archive in archive_set:
-            tar_file_path = os.path.join(archive_path, archive.get_id()) + ".tar"
-            file_list.append(tar_file_path)
+
+        for arch_num in range(st_arch, n_arch):
+            # determine which archive to download and stage (tar)
+            archive = archive_set[arch_num]
+            # get the name of the target directory
+            # if the archive is packed then the name is the download directory
+            # (this code currently assumes that all archives are either packed
+            # or not.  This could change with some adaptation here)
+            if archive.packed:
+                target_dir = get_download_dir(backend_object, gr)
+            else:
+                # if not packed then it is the target directory from the request
+                target_dir = gr.target_path
+
+            # create the target directory if it doesn't exist
+            try:
+                os.makedirs(target_dir)
+            except:
+                pass
+
+            # get the filelist
+            file_list.extend(archive.get_filtered_file_names())
 
         transfer_id = backend_object.create_download_batch(
             conn,
@@ -372,35 +370,52 @@ def download_batch(backend_object, credentials, gr):
         credentials,
         mode="download"
     )
-    # if the filelist for the GET request is not None then we have to determine
-    # which archives to download
-    archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
-
-    for arch_num in range(st_arch, n_arch):
-        # determine which archive to download and stage (tar)
-        archive = archive_set[arch_num]
-        try:
-            # get the name of the target directory
-            staging_dir = get_download_dir(backend_object, gr)
-            # use Backend.get to pull back the files to a temporary directory
+    try:
+        # we just (potentially) want to get a subset of archives
+        archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
+        # empty file list
+        archive_inc = 0
+        for arch_num in range(st_arch, n_arch):
+            # determine which archive to download and stage (tar)
+            archive = archive_set[arch_num]
+            # Log the download
             logging.info((
                 "Downloading for unarchiving: {}"
             ).format(gr.migration.external_id))
 
-            # get the object name and download
-            archive_name = archive.get_id() + ".tar"
-            archive_inc = backend_object.get(
-                conn,
-                gr.transfer_id,
-                archive_name,
-                staging_dir
-            )
-            # update the last good archive
-            if archive_inc != 0:
-                gr.last_archive += archive_inc
-                gr.save()
-        except Exception as e:
-            raise(e)
+            # Get target dir - staging or just the target directory
+            if archive.packed:
+                target_dir = get_download_dir(backend_object, gr)
+            else:
+                # if not packed then it is the target directory from the request
+                target_dir = gr.target_path
+
+            # create the target directory if it doesn't exist
+            try:
+                os.makedirs(target_dir)
+            except:
+                pass
+
+            # get the list of files, without a prefix
+            file_list = archive.get_filtered_file_names()
+            # download each file to the staging directory
+            file_inc = 0
+            for file_path in file_list:
+                file_inc += backend_object.get(
+                    conn,
+                    gr.transfer_id,
+                    file_path,
+                    target_dir,
+                )
+            # inc archive if all files were downloaded
+            archive_inc += int(file_inc == len(file_list))
+    except Exception as e:
+        raise(e)
+
+    # add to last archive
+    if archive_inc > 0:
+        gr.last_archive += archive_inc
+        gr.save()
 
     # close the batch on the external storage
     backend_object.close_download_batch(
@@ -502,7 +517,7 @@ def put_transfers(backend_object, key):
             try:
                 # connection is created - find_or_create_connection will find it
                 # in the download_to_verify function
-                download_to_verify(backend_object, credentials, pr.pk)
+                download_to_verify(backend_object, credentials, pr)
                 put_count += 1
             except Exception as e:
                 # Something went wrong, set FAILED and failure_reason
@@ -547,13 +562,13 @@ def restore_owner_and_group(backend_object, gr, conn):
             # use just the first returned result
             q = query[0]
             # # check that the keys exist in q
-            if not ("uidNumber" in q):
+            try:
+                uidNumber = q["uidNumber"][0]
+            except:
                 error_string = ((
                     "uidNumber not in returned LDAP query for user id {}"
                 ).format(mig_file.unix_user_id))
                 raise Exception(error_string)
-            else:
-                uidNumber = q["uidNumber"][0]
 
             # query for the group
             query = Query(
@@ -569,13 +584,13 @@ def restore_owner_and_group(backend_object, gr, conn):
             # use just the first returned result
             q = query[0]
             # check that the keys exist in q
-            if not ("gidNumber" in q):
+            try:
+                gidNumber = q["gidNumber"][0]
+            except:
                 error_string = ((
                     "gidNumber not in returned LDAP query for group id {}"
                 ).format(mig_file.unix_group_id))
                 raise Exception(error_string)
-            else:
-                gidNumber = q["gidNumber"][0]
 
             # form the file path
             file_path = os.path.join(
@@ -586,7 +601,6 @@ def restore_owner_and_group(backend_object, gr, conn):
             # check whether there is a filelist and if this file is part of it
             if gr.filelist and mig_file.path not in gr.filelist:
                 continue
-
             # change the directory owner / group
             subprocess.call(
                 ["/usr/bin/sudo",
@@ -761,8 +775,6 @@ def delete_batch(backend_object, credentials, dr):
         # determine which archive to download and stage (tar)
         archive = archive_set[arch_num]
         try:
-            # get the object name and delete
-            archive_name = archive.get_id() + ".tar"
             # use Backend.get to pull back the files to a temporary directory
             logging.info((
                 "Deleting: {}/{}"
@@ -770,7 +782,7 @@ def delete_batch(backend_object, credentials, dr):
             backend_object.delete(
                 conn,
                 dr.migration.external_id,
-                archive_name,
+                archive.get_id(),
             )
             # update the last good archive
             dr.last_archive += 1
@@ -840,7 +852,7 @@ def delete_transfers(backend_object, key):
                 if ((put_req and put_req.stage > MigrationRequest.PUT_PACKING)
                    or (dr.migration.stage == Migration.ON_STORAGE)
                 ):
-                    start_delete(backend_object, dr)
+                    start_delete(backend_object, credentials, dr)
                 else:
                 # transition to DELETE_TIDY if there are no files to delete
                     dr.stage = MigrationRequest.DELETE_TIDY
@@ -911,8 +923,8 @@ def run(*args):
         sum_c = 0
         for c in connection_pool.pool:
             sum_c += len(connection_pool.pool)
-        print ("Number of connections: {}".format(sum_c))
-
-        # sleep for ten secs if nothing happened in the loop
-        if n_procs == 0:
-            sleep(10)
+        # print ("Number of connections: {}".format(sum_c))
+        #
+        # # sleep for ten secs if nothing happened in the loop
+        # if n_procs == 0:
+        #     sleep(10)
