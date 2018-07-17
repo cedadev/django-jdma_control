@@ -65,7 +65,7 @@ def lock_migration(pr, conn):
                         conn
                     )
                     # append a directory
-                    if os.path.isdir((file_info.filepath)):
+                    if (file_info.is_dir):
                         fileinfos.append(file_info)
                 # root
                 file_info = get_file_info_tuple(
@@ -74,9 +74,7 @@ def lock_migration(pr, conn):
                     conn
                 )
                 # append the root if not in fileinfos
-                if (os.path.isdir(file_info.filepath)
-                    and file_info not in fileinfos
-                ):
+                if (file_info.is_dir and file_info not in fileinfos):
                     fileinfos.append(file_info)
         else:
             # get the info for the file
@@ -157,6 +155,8 @@ def lock_migration(pr, conn):
         mig_arc = MigrationArchive()
         # assign the migration, copy from the MigrationRequest
         mig_arc.migration = pr.migration
+        # determine whether it should be packed or not
+        mig_arc.packed = backend_object.pack_data()
         # save the migration archive
         mig_arc.save()
 
@@ -169,6 +169,8 @@ def lock_migration(pr, conn):
             # n_current_file
             mig_file = MigrationFile()
             fileinfo = fileinfos[n_current_file]
+            # add the size to the current archive size
+            current_size += fileinfo.size
             # fill in the details
             # the filepath has the commonprefix removed
             mig_file.path = fileinfo.filepath.replace(
@@ -181,10 +183,8 @@ def lock_migration(pr, conn):
             mig_file.unix_permission = fileinfo.unix_permission
             mig_file.archive = mig_arc
 
-            # add the size to the current archive size
-            current_size += fileinfo.size
             # add the size to the total size for the migration - to check
-            # agains the quota
+            # against the quota
             total_size += fileinfo.size
             # go to the next file (going backwards through a descending
             # sorted list remember!)
@@ -196,9 +196,13 @@ def lock_migration(pr, conn):
                 # os.path.join to treat it as the root
                 if mig_file.path[0] == "/":
                     mig_file.path = mig_file.path[1:]
+                # save the size
+                mig_file.archive.size = current_size
                 # save the Migration File
                 mig_file.save()
                 logging.info("PUT: Added file: " + mig_file.path)
+        # save the migration archive
+        mig_arc.save()
 
     # check whether the total size + the quota_used is greater than the
     # quota_size

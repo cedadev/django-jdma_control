@@ -20,7 +20,6 @@ import elastic_tape.shared as ET_shared
 import elastic_tape.shared.storaged_pb2 as ET_proto
 
 import jdma_site.settings as settings
-from time import sleep
 
 # create the connection pool - these are needed for the get transfers, as each
 # transfer thread requires a connection that is kept up
@@ -234,6 +233,10 @@ class ElasticTapeBackend(Backend):
             raise Exception(e)
         return completed_PUTs, completed_GETs, completed_DELETEs
 
+    def pack_data(self):
+        """Should the data be packed into a tarfile for this backend?"""
+        return False
+
     def create_connection(self, user, workspace, credentials, mode="upload"):
         """Create connection to Elastic Tape, using the supplied credentials.
         (There are no required credentials!)
@@ -297,7 +300,7 @@ class ElasticTapeBackend(Backend):
         """Close the download batch for the elastic tape."""
         return
 
-    def get(self, conn, transfer_id, archive, target_dir, thread_number=None):
+    def get(self, conn, transfer_id, object_name, target_dir, thread_number=None):
         """Download a number files from the elastic tape to a target directory.
         We can run this function in a thread to parallelise the transfers.
         """
@@ -451,7 +454,7 @@ class ElasticTapeBackend(Backend):
         asyncronous structure so replicating it here is not necessary."""
         return
 
-    def put(self, conn, batch_id, archive):
+    def put(self, conn, batch_id, archive, packed=False):
         """Put a staged archive (with path archive) onto the elastic tape.
         Here we add to the conn.files list of files, which the names of are
         all uploaded on close_upload_batch
@@ -459,7 +462,7 @@ class ElasticTapeBackend(Backend):
 
         try:
             # get the next transferrable for this batch and ip address
-            ip = socket.gethostbyname(socket.gethostname())
+            ip = socket.gethostbyname(so5cket.gethostname())
             transfer = conn.getNextTransferrable(PI=ip, batchID=int(batch_id))
             # Handle the transfer
             if transfer != None:
@@ -488,8 +491,9 @@ class ElasticTapeBackend(Backend):
 
     def delete(self, conn, batch_id, archive):
         """Delete a single tarred archive of files from the object store"""
-        object_name = os.path.basename(archive)
-        conn.delete_object(Bucket=batch_id, Key=object_name)
+        conn.deleteBatchByID(conn.jdma_workspace.workspace,
+                             conn.jdma_user,
+                             batch_id)
 
     def user_has_put_permission(self, conn):
         """Check whether the user has permission to access the elastic tape,

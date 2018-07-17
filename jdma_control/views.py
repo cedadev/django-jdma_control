@@ -780,7 +780,7 @@ class MigrationRequestView(View):
                     if not user_has_write_permission(f, data["name"]):
                         error_data["error"] += (
                             "User does not have write permission for "
-                            "file/directory: {}."
+                            "file/directory: {}"
                         ).format(f)
                         error = True
                 if error:
