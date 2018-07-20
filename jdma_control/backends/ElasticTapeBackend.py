@@ -10,6 +10,7 @@ from django.db.models import Q
 
 import requests
 from bs4 import BeautifulSoup
+from time import sleep
 
 from jdma_control.backends.Backend import Backend
 from jdma_control.backends import ElasticTapeSettings as ET_Settings
@@ -60,8 +61,6 @@ def get_completed_puts():
         files = bs.select("file")
         # count the number of synced files
         n_synced = 0
-        # count the number of archives
-        n_archives = pr.migration.migrationarchive_set.count()
         # loop over these files
         for f in files:
             state = f.find("current_state").text.strip()
@@ -69,10 +68,19 @@ def get_completed_puts():
             # state is SYNCED for completed PUT transfers
             if state == "SYNCED" or state == "CACHED_SYNCED":
                 n_synced += 1
-        # if the number of synced is equal to the number of archives then the
-        # PUT has completed
-        if n_synced == n_archives:
+
+        # get the total number of files in all the archives
+        n_archive_files = 0
+        # loop over each archive in the migration
+        archive_set = pr.migration.migrationarchive_set.order_by('pk')
+        for archive in archive_set:
+            # get the list of files for this archive
+            file_list = archive.get_filtered_file_names()
+            n_archive_files += len(file_list)
+        # compare number synched with number in all archives
+        if n_archive_files == n_synced:
             completed_PUTs.append(pr.migration.external_id)
+
     return completed_PUTs
 
 
@@ -92,10 +100,11 @@ def get_completed_gets():
         & Q(migration__storage__storage=storage_id)
     )
     #
+    backend = ElasticTapeBackend()
     for gr in get_reqs:
         # create or find a connection to the ET server
         new_conn = et_connection_pool.find_or_create_connection(
-            self,
+            backend,
             gr,
             None,
             mode="download",
@@ -117,8 +126,7 @@ def get_completed_gets():
 def get_completed_deletes():
     """Get all the completed deletes for the ObjectStore"""
     # avoiding a circular dependency
-    from jdma_control.models import MigrationRequest, Migration, StorageQuota
-    # get the storage id
+    from jdma_control.models import MigrationRequest, Migration, StorageQuota    # get the storage id
     storage_id = StorageQuota.get_storage_index("elastictape")
 
     # list of completed DELETEs to return
@@ -258,7 +266,7 @@ class ElasticTapeBackend(Backend):
         conn.close()
         return
 
-    def create_download_batch(self, conn, external_id, file_list=[], target_dir=""):
+    def create_download_batch(self, conn, get_req, file_list=[]):
         """Create a download batch for the elastic tape.
         This will also instigate the transfer, and run the transfers, as ET
         requires the conn to stay up during the transfer.
@@ -269,6 +277,8 @@ class ElasticTapeBackend(Backend):
             if len(file_list) == 0:
                 return
 
+            # get the external id
+            external_id = get_req.migration.external_id
             # Get the ip address of the sender
             ip = socket.gethostbyname(socket.gethostname())
 
@@ -281,9 +291,11 @@ class ElasticTapeBackend(Backend):
             # override the override
             batch.override = 0
 
+            # get the common_path
+            cp = get_req.migration.common_path
             # add the files to the batch
             for f in file_list:
-                batch.addFile(f)
+                batch.addFile(os.path.join(cp,f))
 
             # register a batch retrieval
             batch_retrieve = batch.retrieve()
@@ -300,7 +312,7 @@ class ElasticTapeBackend(Backend):
         """Close the download batch for the elastic tape."""
         return
 
-    def get(self, conn, transfer_id, object_name, target_dir, thread_number=None):
+    def get(self, conn, get_req, object_name, target_dir, thread_number=None):
         """Download a number files from the elastic tape to a target directory.
         We can run this function in a thread to parallelise the transfers.
         """
@@ -308,24 +320,19 @@ class ElasticTapeBackend(Backend):
         from jdma_control.models import MigrationRequest, StorageQuota
         # get the storage id for the backend object
         storage_id = StorageQuota.get_storage_index(self.get_id())
-        gr = MigrationRequest.objects.get(
-            Q(request_type=MigrationRequest.GET)
-            & Q(transfer_id=transfer_id)
-            & Q(migration__storage__storage=storage_id)
-        )
         # The ET library requires a separate connection for each download, and
         # a marshalling connection (which is conn)
         global et_connection_pool
         new_conn = et_connection_pool.find_or_create_connection(
             self,
-            gr,
+            get_req,
             None,       # are credentials needed?
             mode="download",
             thread_number=thread_number
         )
 
         # get the next processable / transferrable tar file
-        new_conn.msgIface.sendNextProcessable(int(transfer_id))
+        new_conn.msgIface.sendNextProcessable(int(get_req.transfer_id))
         # read the files to transfer
         trans_data = new_conn.msgIface.readFiles()
         # print(int(transfer_id), trans_data)
@@ -340,7 +347,7 @@ class ElasticTapeBackend(Backend):
             # finished - delete the connection
             et_connection_pool.close_connection(
                 self,
-                transfer_id,
+                get_req.transfer_id,
                 thread_number=thread_number
             )
 
@@ -400,12 +407,26 @@ class ElasticTapeBackend(Backend):
         os.fsync(handle.fileno())
         handle.close()
 
-        # extract the tar file
+        # extract the tar file - two modes, one for VERIFY (all archive files)
+        # and one for GET (just the files in the filelist, OR all the files in the
+        # archives
         try:
             tarData = tarfile.open(tempname)
-            for f in fileset:
-                tarname = f.fileDetails.Filename
-                tarData.extract(tarname.lstrip('/'), target_dir)
+            # get the list of files depending on the request type
+            if (get_req.request_type == MigrationRequest.PUT
+                or not get_req.filelist
+                or len(get_req.filelist) == 0):
+                # loop over each archive in the migration
+                archive_set = get_req.migration.migrationarchive_set.order_by('pk')
+                for archive in archive_set:
+                    # get the list of files for this archive
+                    file_list = archive.get_filtered_file_names()
+
+            else:
+                filelist = get_req.filelist
+            # do the extraction
+            for f in filelist:
+                tarData.extract(f.lstrip('/'), target_dir)
             # delete the tarfile
             os.unlink(tempname)
         except:
@@ -415,7 +436,7 @@ class ElasticTapeBackend(Backend):
 
         return 1
 
-    def create_upload_batch(self, conn, batch_name="", file_list=[]):
+    def create_upload_batch(self, conn, put_req, file_list=[]):
         """Create a batch on the elastic tape and upload the filenames.
         The batch id will be created.
         """
@@ -427,6 +448,7 @@ class ElasticTapeBackend(Backend):
             # Get the ip address of the sender
             ip = socket.gethostbyname(socket.gethostname())
 
+            batch_name = put_req.migration.label
             # create a new batch
             batch = conn.newBatch(conn.jdma_workspace, batch_name)
             # override the requester in the Batch
@@ -454,7 +476,7 @@ class ElasticTapeBackend(Backend):
         asyncronous structure so replicating it here is not necessary."""
         return
 
-    def put(self, conn, batch_id, archive, packed=False):
+    def put(self, conn, put_req, archive_path, packed=False):
         """Put a staged archive (with path archive) onto the elastic tape.
         Here we add to the conn.files list of files, which the names of are
         all uploaded on close_upload_batch
@@ -462,10 +484,16 @@ class ElasticTapeBackend(Backend):
 
         try:
             # get the next transferrable for this batch and ip address
-            ip = socket.gethostbyname(so5cket.gethostname())
-            transfer = conn.getNextTransferrable(PI=ip, batchID=int(batch_id))
+            ip = socket.gethostbyname(socket.gethostname())
+            transfer = conn.getNextTransferrable(
+                           PI=ip,
+                           batchID=int(put_req.migration.external_id)
+                       )
             # Handle the transfer
-            if transfer != None:
+            if transfer == None:
+                time.sleep(0.01)  # don't hammer the connection!
+                                  # have to rethink this for parallel
+            else:
                 transfer.send()
         except ET_shared.error.StorageDError as e:
             if e.code == ET_shared.error.ECCHEFUL:

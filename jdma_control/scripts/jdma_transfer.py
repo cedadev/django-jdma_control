@@ -66,7 +66,7 @@ def start_upload(backend_object, credentials, pr):
 
             external_id = backend_object.create_upload_batch(
                 conn,
-                batch_name = pr.migration.label,
+                pr,
                 file_list  = file_list
             )
         except Exception as e:
@@ -201,9 +201,8 @@ def start_verify(backend_object, credentials, pr):
 
         transfer_id = backend_object.create_download_batch(
             conn,
-            pr.migration.external_id,
+            pr,
             file_list  = file_list,
-            target_dir = target_dir
         )
     except Exception as e:
         storage_name = StorageQuota.get_storage_name(
@@ -265,7 +264,7 @@ def download_to_verify(backend_object, credentials, pr):
             for file_path in file_list:
                 file_inc += backend_object.get(
                     conn,
-                    pr.transfer_id,
+                    pr,
                     file_path,
                     verify_dir,
                 )
@@ -329,9 +328,8 @@ def start_download(backend_object, credentials, gr):
 
         transfer_id = backend_object.create_download_batch(
             conn,
-            gr.migration.external_id,
+            gr,
             file_list  = file_list,
-            target_dir = target_dir
         )
     except Exception as e:
         storage_name = StorageQuota.get_storage_name(
@@ -403,7 +401,7 @@ def download_batch(backend_object, credentials, gr):
             for file_path in file_list:
                 file_inc += backend_object.get(
                     conn,
-                    gr.transfer_id,
+                    gr,
                     file_path,
                     target_dir,
                 )
