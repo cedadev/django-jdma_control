@@ -229,15 +229,15 @@ class ObjectStoreBackend(Backend):
         """
         return
 
-    def create_download_batch(self, conn, external_id, file_list=[], target_dir=""):
+    def create_download_batch(self, conn, get_req, file_list=[]):
         """Do nothing for object store."""
-        return external_id
+        return get_req.migration.external_id
 
     def close_download_batch(self, conn, transfer_id):
         """Do nothing for object store."""
         return
 
-    def get(self, conn, transfer_id, object_name, target_dir):
+    def get(self, conn, get_req, object_name, target_dir):
         """Download a batch of files from the Object Store to a target
         directory.
         """
@@ -252,7 +252,7 @@ class ObjectStoreBackend(Backend):
         conn.download_file(transfer_id, object_name, download_file_path)
         return 1
 
-    def create_upload_batch(self, conn, batch_name="", file_list=[]):
+    def create_upload_batch(self, conn, put_req, file_list=[]):
         """Create a batch on the object store and return the batch id.
         For the object store the batch id is the groupworkspace name appended
         with the next batch number for that groupworkspace.

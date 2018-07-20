@@ -8,12 +8,16 @@ class ConnectionPool:
     def __init__(self):
         self.pool = {}
 
-    def __get_connection_id(connection_id, thread_number):
+    def __get_connection_id(connection_id, thread_number, mode="upload"):
         if thread_number == None:
-            new_connection_id = str(connection_id)
-        else:
             new_connection_id = "{}_{}".format(
                 str(connection_id),
+                mode
+            )
+        else:
+            new_connection_id = "{}_{}_{}".format(
+                str(connection_id),
+                mode,
                 str(thread_number)
             )
         return new_connection_id
@@ -26,12 +30,13 @@ class ConnectionPool:
                                   mode="upload",
                                   thread_number=None
         ):
-        """The connection pool is a dictionary of dictionaries:
-        {backend_id : {mig_id, connection_object }}"""
+        """The connection pool is a dictionary of connections, with a connection
+           id as the key:
+        { connection_id : connection_object }"""
         backend_id = backend_object.get_id()
         connection_id = ConnectionPool.__get_connection_id(
             mig_req.pk,
-            thread_number
+            thread_number,
         )
         if backend_id not in self.pool:
             # backend not found - create connection and asssign
