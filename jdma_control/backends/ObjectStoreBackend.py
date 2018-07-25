@@ -116,7 +116,9 @@ def get_completed_gets(backend_object):
                     staging_dir = gr.target_path
             # now loop over each file in the archive
             n_completed_files = 0
-            file_name_list = archive.get_filtered_file_names()
+            file_name_list = archive.get_filtered_file_names(
+                filelist = gr.filelist
+            )
             for file_name in file_name_list:
                 file_path = os.path.join(staging_dir, file_name)
                 try:
@@ -249,7 +251,11 @@ class ObjectStoreBackend(Backend):
             os.makedirs(sub_path)
         except:
             pass
-        conn.download_file(transfer_id, object_name, download_file_path)
+        conn.download_file(
+            get_req.migration.external_id,
+            object_name,
+            download_file_path
+        )
         return 1
 
     def create_upload_batch(self, conn, put_req, file_list=[]):

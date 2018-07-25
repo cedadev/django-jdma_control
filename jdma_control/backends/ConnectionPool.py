@@ -32,7 +32,7 @@ class ConnectionPool:
         ):
         """The connection pool is a dictionary of connections, with a connection
            id as the key:
-        { connection_id : connection_object }"""
+           { connection_id : connection_object }"""
         backend_id = backend_object.get_id()
         connection_id = ConnectionPool.__get_connection_id(
             mig_req.pk,

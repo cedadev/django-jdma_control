@@ -539,13 +539,16 @@ class MigrationArchive(models.Model):
             return [os.path.join(prefix,
                     f.path) for f in self.migrationfile_set.all()]
 
-    def get_filtered_file_names(self, prefix=""):
+    def get_filtered_file_names(self, prefix="", filelist=None):
         """Return a list of files from the archive to be / that have been uploaded.
            If the archive is packed, then return the archive id + ".tar".
            If the archive is not packed then return the files without the
              common path prefix.
            This function filters out any files which have a digest of 0 as these
            are directories.  This list can then be used to upload to the backends.
+           The function can also be given an optional filelist, to only include
+           files that are in the filelist.  This is so that GET requests can
+           specify a subset of files to download.
         """
         if self.packed:
             return [os.path.join(prefix, self.get_id() + ".tar")]
@@ -554,7 +557,11 @@ class MigrationArchive(models.Model):
             file_list = []
             for f in self.migrationfile_set.all():
                 if f.digest != "0":
-                    file_list.append(os.path.join(prefix, f.path))
+                    if filelist is None:
+                        file_list.append(os.path.join(prefix, f.path))
+                    else:
+                        if f.path in filelist:
+                            file_list.append(os.path.join(prefix, f.path))
             return file_list
 
 @python_2_unicode_compatible
