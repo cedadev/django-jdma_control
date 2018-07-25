@@ -323,13 +323,17 @@ def start_download(backend_object, credentials, gr):
             except:
                 pass
 
-            # get the filelist
-            file_list.extend(archive.get_filtered_file_names())
+            # get the filelist - filter on digest and whether the file
+            # has been requested
+            filt_file_list = archive.get_filtered_file_names(
+                filelist=gr.filelist
+            )
+            file_list.extend(filt_file_list)
 
         transfer_id = backend_object.create_download_batch(
             conn,
             gr,
-            file_list  = file_list,
+            file_list = file_list,
         )
     except Exception as e:
         storage_name = StorageQuota.get_storage_name(
@@ -395,7 +399,7 @@ def download_batch(backend_object, credentials, gr):
                 pass
 
             # get the list of files, without a prefix
-            file_list = archive.get_filtered_file_names()
+            file_list = archive.get_filtered_file_names(filelist=gr.filelist)
             # download each file to the staging directory
             file_inc = 0
             for file_path in file_list:
@@ -596,24 +600,26 @@ def restore_owner_and_group(backend_object, gr, conn):
                 mig_file.path
             )
 
-            # check whether there is a filelist and if this file is part of it
-            if gr.filelist and mig_file.path not in gr.filelist:
-                continue
-            # change the directory owner / group
-            subprocess.call(
-                ["/usr/bin/sudo",
-                 "/bin/chown",
-                 str(uidNumber)+":"+str(gidNumber),
-                 file_path]
-            )
+            # Note that, if there is a filelist then the files may not exist
+            # However, to successfully restore any parent directories that may
+            # be created, we have to attempt to restore all of the files in the
+            # archive.  We'll do this by checking the filepath
+            if os.path.exists(file_path):
+                # change the directory owner / group
+                subprocess.call(
+                    ["/usr/bin/sudo",
+                     "/bin/chown",
+                     str(uidNumber)+":"+str(gidNumber),
+                     file_path]
+                )
 
-            # change the permissions back to the original
-            subprocess.call(
-                ["/usr/bin/sudo",
-                 "/bin/chmod",
-                 str(mig_file.unix_permission),
-                 file_path]
-            )
+                # change the permissions back to the original
+                subprocess.call(
+                    ["/usr/bin/sudo",
+                     "/bin/chmod",
+                     str(mig_file.unix_permission),
+                     file_path]
+                )
     # restore the target_path
     # change the directory owner / group
     subprocess.call(
@@ -902,25 +908,34 @@ def run(*args):
 
     # run this indefinitely until the signals are triggered
     while True:
-        # read the decrypt key
-        key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
-        n_procs = 0
-        # run as a daemon
-        if len(args) == 0:
-            for backend in jdma_control.backends.get_backends():
-                n_procs = process(backend, key)
-        else:
-            backend = args[0]
-            if not backend in jdma_control.backends.get_backend_ids():
-                logging.error("Backend: " + backend + " not recognised.")
+        #try:
+        if True:
+            # read the decrypt key
+            key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
+            n_procs = 0
+            # run as a daemon
+            if len(args) == 0:
+                for backend in jdma_control.backends.get_backends():
+                    n_procs = process(backend, key)
             else:
-                backend = jdma_control.backends.get_backend_from_id(backend)
-                n_procs = process(backend, key)
+                backend = args[0]
+                if not backend in jdma_control.backends.get_backend_ids():
+                    logging.error("Backend: " + backend + " not recognised.")
+                else:
+                    backend = jdma_control.backends.get_backend_from_id(backend)
+                    n_procs = process(backend, key)
 
-        # print the number of connections
-        sum_c = 0
-        for c in connection_pool.pool:
-            sum_c += len(connection_pool.pool)
+            # print the number of connections
+            sum_c = 0
+            for c in connection_pool.pool:
+                sum_c += len(connection_pool.pool)
+        #except Exception as e:
+        else:
+            # catch all exceptions as we want this to run in a loop for all
+            # backends and transfers - we don't want one transfer to crash out
+            # the transfer daemon with a single bad transfer!
+            # output the exception to the log so we can see what went wrong
+            logging.error(str(e))
         # print ("Number of connections: {}".format(sum_c))
         #
         # # sleep for ten secs if nothing happened in the loop

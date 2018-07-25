@@ -675,10 +675,14 @@ class MigrationRequestView(View):
                     ).format(str(target_path))
                     return HttpError(error_data, status=403)
 
-                # All the checks have been passed so we can now add the request to
-                # the JDMA database
+                # All the checks have been passed so we can now add the request
+                # to the JDMA database
                 if filelist:
-                    migration_request.filelist = filelist
+                    # We want to strip the migration's common path from the files
+                    # also need to remove the trailing slash
+                    migration_request.filelist = [
+                        f.replace(migration.common_path, "")[1:] for f in filelist
+                    ]
                 migration_request.target_path = target_path
                 migration_request.stage = MigrationRequest.GET_START
                 # credentials - we encrypt these using AES EAX mode
@@ -1220,12 +1224,15 @@ class MigrationFileView(View):
                     # add the files to the archive data
                     file_data = []
                     for f in files:
+                        full_path = os.path.join(mig.common_path, f.path)
                         file_dict = {"pk " : f.pk,
-                                     "path" : f.path,
+                                     "path" : full_path,
                                      "size" : f.size}
                         if digest:
                             file_dict["digest"] = f.digest
-                        file_data.append(file_dict)
+                        # don't add if digest is zero
+                        if f.digest != "0":
+                            file_data.append(file_dict)
                     arch_dict["files"] = file_data
                     archive_data.append(arch_dict)
                 mig_data_local["archives"] = archive_data
@@ -1320,7 +1327,10 @@ class MigrationArchiveView(View):
                     if digest:
                         arch_dict["digest"] = archive.digest
 
-                    archive_data.append(arch_dict)
+                    # don't add files with a 0 digest, as these are folders /
+                    # directories
+                    if archive.digest != "0":
+                        archive_data.append(arch_dict)
                 mig_data_local["archives"] = archive_data
                 mig_data.append(mig_data_local)
 
