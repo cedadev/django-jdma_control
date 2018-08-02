@@ -269,10 +269,8 @@ def run_ET_transfer(backend_object):
 
         try:
             transfer = conn.getNextTransferrable(PI = ip)
-            print (transfer, ip)
         except ET_shared.error.StorageDError as e:
             if e.code == ET_shared.error.ECCHEFUL:
-                print(e)
                 # cache is full, do nothing, jdma_monitor will try again later
                 # leave connection open
                 return 0
@@ -396,7 +394,6 @@ class ElasticTapeBackend(Backend):
             transfer_id = conn.msgIface.retrieveBatch(batch_retrieve)
             # start the retrieval
             conn.msgIface.sendStartRetrieve(int(transfer_id))
-            print(ip)
 
         except Exception as e:
             transfer_id = None
@@ -430,7 +427,6 @@ class ElasticTapeBackend(Backend):
         new_conn.msgIface.sendNextProcessable(int(get_req.transfer_id))
         # read the files to transfer
         trans_data = new_conn.msgIface.readFiles()
-        # print(int(transfer_id), trans_data)
         # if trans_data is None or data is finished then exit. As the transfer
         # runs as a daemon, an attempt to download will be made next time the
         # loop occurs
