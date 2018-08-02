@@ -10,7 +10,6 @@ from django.db.models import Q
 
 import requests
 from bs4 import BeautifulSoup
-from time import sleep
 
 from jdma_control.backends.Backend import Backend
 from jdma_control.backends import ElasticTapeSettings as ET_Settings
@@ -87,7 +86,6 @@ def get_completed_puts():
 def get_completed_gets():
     # avoiding a circular dependency
     from jdma_control.models import MigrationRequest, StorageQuota, MigrationArchive
-    global et_connection_pool
     # get the storage id
     storage_id = StorageQuota.get_storage_index("elastictape")
 
@@ -102,23 +100,38 @@ def get_completed_gets():
     #
     backend = ElasticTapeBackend()
     for gr in get_reqs:
-        # create or find a connection to the ET server
-        new_conn = et_connection_pool.find_or_create_connection(
-            backend,
-            gr,
-            None,
-            mode="download",
-            thread_number=None
-        )        # use the elastic tape library to query the retrieval request and
-        # add to completed_GETs if the retrieval has completed
-        try:
-            if new_conn.msgIface.checkRRComplete(int(gr.transfer_id)):
-                completed_GETs.append(gr.transfer_id)
-                # close the transfer
-                badFiles = new_conn.msgIface.FinishRR(int(gr.transfer_id))
-        except:
-            # Old transfer ids hanging around?
-            pass
+        # get a list of synced files for this workspace and user and batch
+        retrieval_url = "{}?rr_id={};workspace={}".format(
+            ET_Settings.ET_RETRIEVAL_URL,
+            gr.transfer_id,
+            gr.migration.workspace.workspace,
+        )
+        # use requests to fetch the URL
+        r = requests.get(retrieval_url)
+        if r.status_code == 200:
+            bs = BeautifulSoup(r.content, "xml")
+        else:
+            raise Exception(ET_Settings.ET_RETRIEVAL_URL + " is unreachable.")
+        # get the first table from beautiful soup
+        table = bs.find_all("table")[0]
+        # check that a table has been found - there might be a slight
+        # synchronisation difference between jdma_transfer and jdma_monitor
+        # i.e. the entry might be in the database but not updated on the
+        # RETRIEVAL_URL
+        if len(table) == 0:
+            continue
+        # get the first row
+        row_1 = table.find_all("tr")[1]
+        # the transfer id is the first column, the status is the third
+        cols = row_1.find_all("td")
+        transfer_id = cols[0].get_text()
+        status = cols[2].get_text()
+        # this is a paranoid check - this really shouldn't happen!
+        if (transfer_id != gr.transfer_id):
+            raise Exception("Transfer id mismatch")
+        # check for completion
+        if status == "COMPLETED":
+            completed_GETs.append(gr.transfer_id)
 
     return completed_GETs
 
@@ -138,7 +151,31 @@ def get_completed_deletes():
         & Q(migration__storage__storage=storage_id)
     )
     for dr in del_reqs:
-        pass
+        # assume deleted
+        deleted = True
+        # get a list of synced batches for this workspace and user
+        holdings_url = "{}?workspace={};caller={};level=batch".format(
+            ET_Settings.ET_HOLDINGS_URL,
+            pr.migration.workspace.workspace,
+            pr.migration.user.name
+        )
+        # use requests to fetch the URL
+        r = requests.get(holdings_url)
+        if r.status_code == 200:
+            bs = BeautifulSoup(r.content, "xml")
+        else:
+            raise Exception(ET_Settings.ET_ROLE_URL + " is unreachable.")
+        # if the dr.migration.external_id is not in the list of batches
+        # then the delete has completed
+        batches = bs.select("batch")
+        for b in batches:
+            batch_id = f.find("batch_id").text.strip()
+            if batch_id == dr.migration.external_id:
+                deleted = False
+
+        if deleted:
+            # it's been deleted so add to the returned list of completed DELETEs
+            completed_DELETEs.append(dr.migration.external_id)
     return completed_DELETEs
 
 
@@ -214,6 +251,59 @@ def workspace_quota_remaining(jdma_user, jdma_workspace):
 
     return quota_allocated - quota_used
 
+def run_ET_transfer(backend_object):
+    """Run the transfer from the jdma_monitor process."""
+    # get the ip address
+    ip = socket.gethostbyname(socket.gethostname())
+    try:
+        # See et_transfer_mp for info and original code
+        conn = et_connection_pool.find_or_create_connection(
+            backend_object,
+            mig_req = None,
+            credentials = None,
+            mode="upload"
+        )
+    except Exception as e:
+        raise Exception(e)
+    else:
+
+        try:
+            transfer = conn.getNextTransferrable(PI = ip)
+            print (transfer, ip)
+        except ET_shared.error.StorageDError as e:
+            if e.code == ET_shared.error.ECCHEFUL:
+                print(e)
+                # cache is full, do nothing, jdma_monitor will try again later
+                # leave connection open
+                return 0
+            else:
+                # some other error - raise an Exception and the migration will
+                # be set to FAILED
+                et_connection_pool.close_connection(
+                    backend_object,
+                    mig_req = None
+                )
+                raise Exception(e)
+                return 0
+
+        if transfer is None:
+            # leave connection open!
+            return 0
+        else:
+            eList = transfer.verify()
+            n_files = 0
+            if eList:
+                for e in eList:
+                    conn.msgIface.sendError(e)
+            else:
+                transfer.send()
+                n_files = 1
+            et_connection_pool.close_connection(
+                backend_object,
+                mig_req = None
+            )
+            return n_files
+
 
 class ElasticTapeBackend(Backend):
     """Class for a JASMIN Data Migration App backend which targets Elastic Tape.
@@ -231,12 +321,15 @@ class ElasticTapeBackend(Backend):
         except Exception:
             return False
 
-    def monitor(self):
+    def monitor(self, thread_number=None):
         """Determine which batches have completed."""
         try:
+            # first run the transfer
+            n_transfers = run_ET_transfer(self)
             completed_PUTs = get_completed_puts()
             completed_GETs = get_completed_gets()
             completed_DELETEs = get_completed_deletes()
+            # pause if no transfers
         except Exception as e:
             raise Exception(e)
         return completed_PUTs, completed_GETs, completed_DELETEs
@@ -295,13 +388,15 @@ class ElasticTapeBackend(Backend):
             cp = get_req.migration.common_path
             # add the files to the batch
             for f in file_list:
-                batch.addFile(os.path.join(cp,f))
+                fname = os.path.join(cp,f)
+                batch.addFile(fname)
 
             # register a batch retrieval
             batch_retrieve = batch.retrieve()
             transfer_id = conn.msgIface.retrieveBatch(batch_retrieve)
             # start the retrieval
             conn.msgIface.sendStartRetrieve(int(transfer_id))
+            print(ip)
 
         except Exception as e:
             transfer_id = None
@@ -322,7 +417,7 @@ class ElasticTapeBackend(Backend):
         storage_id = StorageQuota.get_storage_index(self.get_id())
         # The ET library requires a separate connection for each download, and
         # a marshalling connection (which is conn)
-        global et_connection_pool
+        # global et_connection_pool
         new_conn = et_connection_pool.find_or_create_connection(
             self,
             get_req,
@@ -343,13 +438,15 @@ class ElasticTapeBackend(Backend):
             # leave the connection open
             return 0
 
+        # check
+        if conn.msgIface.checkRRComplete(int(get_req.transfer_id)):
+            # close the transfer
+            badFiles = conn.msgIface.FinishRR(int(get_req.transfer_id))
+            return 0
+
         if trans_data.finished:
-            # finished - delete the connection
-            et_connection_pool.close_connection(
-                self,
-                get_req.transfer_id,
-                thread_number=thread_number
-            )
+            # finished - just return
+            return 0
 
         if trans_data.errored:
             et_connection_pool.close_connection()
@@ -412,6 +509,7 @@ class ElasticTapeBackend(Backend):
         # archives
         try:
             tarData = tarfile.open(tempname)
+            filelist = []
             # get the list of files depending on the request type
             if (get_req.request_type == MigrationRequest.PUT
                 or not get_req.filelist
@@ -420,8 +518,9 @@ class ElasticTapeBackend(Backend):
                 archive_set = get_req.migration.migrationarchive_set.order_by('pk')
                 for archive in archive_set:
                     # get the list of files for this archive
-                    file_list = archive.get_filtered_file_names()
-
+                    filelist.extend(archive.get_filtered_file_names(
+                                    prefix=get_req.migration.common_path
+                    ))
             else:
                 filelist = get_req.filelist
             # do the extraction
@@ -429,9 +528,9 @@ class ElasticTapeBackend(Backend):
                 tarData.extract(f.lstrip('/'), target_dir)
             # delete the tarfile
             os.unlink(tempname)
-        except:
+        except Exception as e:
             raise Exception(
-                "Error extracting ET tar file: {}".format(tempname)
+                  "Error extracting ET tar file: {} {}".format(tempname, str(e))
             )
 
         return 1
@@ -485,29 +584,29 @@ class ElasticTapeBackend(Backend):
         try:
             # get the next transferrable for this batch and ip address
             ip = socket.gethostbyname(socket.gethostname())
-            transfer = conn.getNextTransferrable(
+            transfer = conn.xTransferrable(
                            PI=ip,
                            batchID=int(put_req.migration.external_id)
                        )
             # Handle the transfer
-            if transfer == None:
-                time.sleep(0.01)  # don't hammer the connection!
-                                  # have to rethink this for parallel
+            if transfer is None:
+                return 0
             else:
                 transfer.send()
         except ET_shared.error.StorageDError as e:
             if e.code == ET_shared.error.ECCHEFUL:
                 # cache is full, do nothing, jdma_transfer will try again later
-                pass
+                return 0
             else:
                 # some other error - raise an Exception and the migration will
                 # be set to FAILED
                 raise Exception(e)
         except Exception as e:
             raise Exception(e)
-        # return zero for the last_archive count - ET does not need this to keep
-        # a count of which archives have uploaded
-        return 0
+        # return one for the last_archive count - ET does not need this to keep
+        # a count of which archives have uploaded, but we need to know how
+        # many files have uploaded so as to sleep or not
+        return 1
 
     def create_delete_batch(self, conn):
         """Create a batch to delete files from the elastic tape"""

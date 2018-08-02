@@ -239,24 +239,25 @@ class ObjectStoreBackend(Backend):
         """Do nothing for object store."""
         return
 
-    def get(self, conn, get_req, object_name, target_dir):
+    def get(self, conn, get_req, file_list, target_dir):
         """Download a batch of files from the Object Store to a target
         directory.
         """
-        download_file_path = os.path.join(target_dir, object_name)
-        # check that the the sub path exists
-        sub_path = os.path.split(download_file_path)[0]
-        # The "it's better to ask forgiveness method!"
-        try:
-            os.makedirs(sub_path)
-        except:
-            pass
-        conn.download_file(
-            get_req.migration.external_id,
-            object_name,
-            download_file_path
-        )
-        return 1
+        for object_name in file_list:
+            download_file_path = os.path.join(target_dir, object_name)
+            # check that the the sub path exists
+            sub_path = os.path.split(download_file_path)[0]
+            # The "it's better to ask forgiveness method!"
+            try:
+                os.makedirs(sub_path)
+            except:
+                pass
+            conn.download_file(
+                get_req.migration.external_id,
+                object_name,
+                download_file_path
+            )
+        return len(file_list)
 
     def create_upload_batch(self, conn, put_req, file_list=[]):
         """Create a batch on the object store and return the batch id.
@@ -300,19 +301,25 @@ class ObjectStoreBackend(Backend):
            Not needed for object store"""
         return
 
-    def put(self, conn, put_req, archive_path, packed=False):
-        """Put a staged archive (with path archive) onto the Object Store"""
+    def put(self, conn, put_req, file_list, packed=False):
+        """Put a staged archive (with paths in file_list) onto the Object Store"""
         if packed:
-            # get the last part of the path
-            path_split = os.path.split(archive_path)
+            # get the last part of the path - packed archives have 1 entry in
+            # file_list
+            path_split = os.path.split(file_list[0])
             object_name = path_split[-1]
+            conn.upload_file(archive_path,
+                             put_req.migration.external_id,
+                             object_name)
         else:
-            object_name = os.path.relpath(archive_path,
-                                          put_req.migration.common_path)
-        conn.upload_file(archive_path,
-                         put_req.migration.external_id,
-                         object_name)
-        return 1
+            # we have multiple files so create the archive path
+            for archive_path in file_list:
+                object_name = os.path.relpath(archive_path,
+                                              put_req.migration.common_path)
+                conn.upload_file(archive_path,
+                                 put_req.migration.external_id,
+                                 object_name)
+        return len(file_list)
 
     def create_delete_batch(self, conn):
         """Do nothing on the object store"""

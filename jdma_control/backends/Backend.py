@@ -90,7 +90,7 @@ class Backend(object):
         """Close the download batch on the external storage"""
         raise NotImplementedError
 
-    def get(self, conn, get_req, object_name, target_dir):
+    def get(self, conn, get_req, file_list, target_dir):
         """Get the batch from the external storage and download to a
         target_dir"""
         raise NotImplementedError
@@ -104,8 +104,8 @@ class Backend(object):
         """Close the upload batch on the external storage"""
         raise NotImplementedError
 
-    def put(self, conn, put_req, archive, packed=False):
-        """Put a single tarred archive of files into a batch (created using
+    def put(self, conn, put_req, file_list, packed=False):
+        """Put a list of archive files into a batch (created using
         create_batch function) on the external storage"""
         raise NotImplementedError
 

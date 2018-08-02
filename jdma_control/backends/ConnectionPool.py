@@ -25,8 +25,8 @@ class ConnectionPool:
 
     def find_or_create_connection(self,
                                   backend_object,
-                                  mig_req,
-                                  credentials,
+                                  mig_req = None,
+                                  credentials = None,
                                   mode="upload",
                                   thread_number=None
         ):
@@ -34,49 +34,72 @@ class ConnectionPool:
            id as the key:
            { connection_id : connection_object }"""
         backend_id = backend_object.get_id()
+        # allow some defaults
+        if mig_req is not None:
+            connection_number = mig_req.pk
+            user_name = mig_req.migration.user.name
+            workspace = mig_req.migration.workspace.workspace
+        else:
+            connection_number = 0
+            user_name = "jdma"
+            workspace = "jdma"
+
         connection_id = ConnectionPool.__get_connection_id(
-            mig_req.pk,
+            connection_number,
             thread_number,
+            mode,
         )
         if backend_id not in self.pool:
             # backend not found - create connection and asssign
             conn = backend_object.create_connection(
-                mig_req.migration.user.name,
-                mig_req.migration.workspace.workspace,
+                user_name,
+                workspace,
                 credentials,
                 mode
             )
+            #print("Creating connection_id {}".format(connection_id))
             conn_dict = {connection_id : conn}
             self.pool[backend_id] = conn_dict
         else:
             # search for mig_req.pk in the backend
             if connection_id in self.pool[backend_id]:
                 # found
+                #print("Using connection_id {}".format(connection_id))
                 conn = self.pool[backend_id][connection_id]
             else:
                 # not found, so create and return
                 # backend not found - create connection and asssign
                 conn = backend_object.create_connection(
-                    mig_req.migration.user.name,
-                    mig_req.migration.workspace.workspace,
+                    user_name,
+                    workspace,
                     credentials,
                     mode
                 )
+                #print("Creating new connection_id {}".format(connection_id))
                 self.pool[backend_id][connection_id] = conn
         return conn
 
 
-    def close_connection(self, backend_object, mig_req, thread_number=None):
+    def close_connection(self,
+                         backend_object,
+                         mig_req = None,
+                         thread_number=None
+        ):
         """Close the connection and remove it from the dictionary for the
         backend."""
         backend_id = backend_object.get_id()
+        if mig_req is not None:
+            connection_number = mig_req.pk
+        else:
+            connection_number = 0
         thread_id = ConnectionPool.__get_connection_id(
-            mig_req.pk,
+            connection_number,
             thread_number
         )
         if backend_id in self.pool and thread_id in self.pool[backend_id]:
             backend_object.close_connection(self.pool[backend_id][thread_id])
             self.pool[backend_id].pop(thread_id)
+            #print("Closing connection {}".format(thread_id))
 
 
     def close_all_connections(self):
