@@ -3,6 +3,7 @@
 ET_QUOTA_URL = "http://et-monitor.fds.rl.ac.uk/et_user/ET_Holdings_Summary.php"
 ET_ROLE_URL  = "http://et-monitor.fds.rl.ac.uk/et_admin/ET_Role_List.php"
 ET_HOLDINGS_URL = "http://et-monitor.fds.rl.ac.uk/et_user/ET_Holdings_Summary_XML.php"
+ET_RETRIEVAL_URL = "http://et-monitor.fds.rl.ac.uk/et_user/RetrievalWatch.php"
 
 # The place where files are downloaded to when verifying
 VERIFY_DIR  = "/home/vagrant/JDMA_VERIFY"

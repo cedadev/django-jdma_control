@@ -12,11 +12,17 @@ import logging
 
 from django.db.models import Q
 
+import signal
+import sys
+from time import sleep
+
 import jdma_control.backends
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest, StorageQuota
 from jdma_control.scripts.jdma_lock import setup_logging
+from jdma_control.backends.ConnectionPool import ConnectionPool
 
+connection_pool = ConnectionPool()
 
 def monitor_put(completed_PUTs, backend_object):
     """Monitor the PUTs and MIGRATES and transition from PUTTING to
@@ -87,7 +93,6 @@ def monitor_verify(completed_GETs, backend_object):
         & Q(stage=MigrationRequest.VERIFY_GETTING)
         & Q(migration__storage__storage=storage_id)
     )
-
     for vr in verify_reqs:
         if vr.locked:
             continue
@@ -137,17 +142,31 @@ def process(backend):
     monitor_delete(completed_DELETEs, backend_object)
 
 
+def exit_handler(signal, frame):
+    global connection_pool
+    connection_pool.close_all_connections()
+    sys.exit(0)
+
+
 def run(*args):
     # monitor the backends for completed GETs and PUTs (to et)
     # have to monitor each backend
     setup_logging(__name__)
-    if len(args) == 0:
-        for backend in jdma_control.backends.get_backends():
-            process(backend)
-    else:
-        backend = args[0]
-        if not backend in jdma_control.backends.get_backend_ids():
-            logging.error("Backend: " + backend + " not recognised.")
+    # setup exit signal handling
+    signal.signal(signal.SIGINT, exit_handler)
+    signal.signal(signal.SIGHUP, exit_handler)
+    signal.signal(signal.SIGTERM, exit_handler)
+
+    # loop this indefinitely until the exit signals are triggered
+    while True:
+        if len(args) == 0:
+            for backend in jdma_control.backends.get_backends():
+                process(backend)
         else:
-            backend = jdma_control.backends.get_backend_from_id(backend)
-            process(backend)
+            backend = args[0]
+            if not backend in jdma_control.backends.get_backend_ids():
+                logging.error("Backend: " + backend + " not recognised.")
+            else:
+                backend = jdma_control.backends.get_backend_from_id(backend)
+                process(backend)
+        sleep(5)

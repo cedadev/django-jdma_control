@@ -35,7 +35,7 @@ class MigrationAdmin(admin.ModelAdmin):
               'external_id', 'registered_date',
               'common_path', 'common_path_user_id', 'common_path_group_id',
               'common_path_permission')
-    readonly_fields = ('storage', #'external_id',
+    readonly_fields = ('storage', 'external_id',
                        'common_path', 'common_path_user_id',
                        'common_path_group_id', 'common_path_permission')
 

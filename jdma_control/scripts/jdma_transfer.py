@@ -125,23 +125,18 @@ def upload_batch(backend_object, credentials, pr):
             else:
                 prefix = pr.migration.common_path
             # get the list of files for this archive
-            file_list = archive.get_filtered_file_names(prefix)
+            file_list = archive.get_filtered_file_names(prefix,
+                                                        directories = False)
             # behave as if uploading each file individually
             # get the archive to upload
             archive = archive_set[arch_num]
-            file_inc = 0
-            for file_path in file_list:
-                if not os.path.isdir(file_path) and not os.path.islink(file_path):
-                    # log message
-                    logging.info((
-                        "Uploading file: {} to {}"
-                    ).format(file_path, backend_object.get_name()))
-                    # upload object
-                    file_inc += backend_object.put(conn, pr, file_path,
-                                                    archive.packed)
-                else:
-                    # need to fake-count the uploading of directories
-                    file_inc += 1
+            # log message
+            logging.info((
+                "Uploading files: {} to {}"
+            ).format(file_list, backend_object.get_name()))
+            # upload object
+            file_inc = backend_object.put(conn, pr, file_list,
+                                           archive.packed)
             # inc archive if all files went up
             archive_inc += int(file_inc == len(file_list))
 
@@ -162,7 +157,7 @@ def upload_batch(backend_object, credentials, pr):
 
     # monitoring is handled by jdma_monitor, which will transition
     # PUTTING->VERIFY_PENDING when the batch has finished uploading
-
+    return archive_inc
 
 def start_verify(backend_object, credentials, pr):
     """Start the verification process.  Transition from
@@ -202,7 +197,7 @@ def start_verify(backend_object, credentials, pr):
         transfer_id = backend_object.create_download_batch(
             conn,
             pr,
-            file_list  = file_list,
+            file_list = file_list,
         )
     except Exception as e:
         storage_name = StorageQuota.get_storage_name(
@@ -259,15 +254,12 @@ def download_to_verify(backend_object, credentials, pr):
 
             # get the list of files, without a prefix
             file_list = archive.get_filtered_file_names()
-            # download each file to the staging directory
-            file_inc = 0
-            for file_path in file_list:
-                file_inc += backend_object.get(
-                    conn,
-                    pr,
-                    file_path,
-                    verify_dir,
-                )
+            file_inc = backend_object.get(
+                conn,
+                pr,
+                file_list,
+                verify_dir
+            )
             # inc archive if all files went up
             archive_inc += int(file_inc == len(file_list))
         except Exception as e:
@@ -277,15 +269,9 @@ def download_to_verify(backend_object, credentials, pr):
         pr.last_archive += archive_inc
         pr.save()
 
-    # close the batch on the external storage
-    backend_object.close_download_batch(
-        conn,
-        pr.transfer_id
-    )
-
     # jdma_monitor will determine when the batch has finished downloading for
     # verification and transition VERIFY_GETTING->VERIFYING
-
+    return archive_inc
 
 def start_download(backend_object, credentials, gr):
     """Start the download process.  Transition from
@@ -401,14 +387,12 @@ def download_batch(backend_object, credentials, gr):
             # get the list of files, without a prefix
             file_list = archive.get_filtered_file_names(filelist=gr.filelist)
             # download each file to the staging directory
-            file_inc = 0
-            for file_path in file_list:
-                file_inc += backend_object.get(
-                    conn,
-                    gr,
-                    file_path,
-                    target_dir,
-                )
+            file_inc = backend_object.get(
+                conn,
+                gr,
+                file_list,
+                target_dir,
+            )
             # inc archive if all files were downloaded
             archive_inc += int(file_inc == len(file_list))
     except Exception as e:
@@ -427,7 +411,7 @@ def download_batch(backend_object, credentials, gr):
 
     # the archive has been downloaded to the staging directory
     # jdma_pack will unarchive it to the target directory
-
+    return archive_inc
 
 def put_transfers(backend_object, key):
     """Work through the state machine to upload batches to the external
@@ -486,8 +470,7 @@ def put_transfers(backend_object, key):
             try:
                 # connection is created - find_or_create_connection will find it
                 # in the upload_batch function
-                upload_batch(backend_object, credentials, pr)
-                put_count += 1
+                put_count += upload_batch(backend_object, credentials, pr)
             except Exception as e:
                 # Something went wrong, set FAILED and failure_reason
                 mark_migration_failed(pr, str(e), e)
@@ -519,8 +502,7 @@ def put_transfers(backend_object, key):
             try:
                 # connection is created - find_or_create_connection will find it
                 # in the download_to_verify function
-                download_to_verify(backend_object, credentials, pr)
-                put_count += 1
+                put_count += download_to_verify(backend_object, credentials, pr)
             except Exception as e:
                 # Something went wrong, set FAILED and failure_reason
                 mark_migration_failed(pr, str(e), e)
@@ -916,19 +898,22 @@ def run(*args):
             # run as a daemon
             if len(args) == 0:
                 for backend in jdma_control.backends.get_backends():
-                    n_procs = process(backend, key)
+                    n_procs += process(backend, key)
             else:
                 backend = args[0]
                 if not backend in jdma_control.backends.get_backend_ids():
                     logging.error("Backend: " + backend + " not recognised.")
                 else:
                     backend = jdma_control.backends.get_backend_from_id(backend)
-                    n_procs = process(backend, key)
+                    n_procs += process(backend, key)
 
             # print the number of connections
             sum_c = 0
             for c in connection_pool.pool:
                 sum_c += len(connection_pool.pool)
+            # sleep for ten secs if nothing happened in the loop
+            if n_procs == 0:
+                sleep(10)
         #except Exception as e:
         else:
             # catch all exceptions as we want this to run in a loop for all
@@ -938,6 +923,3 @@ def run(*args):
             logging.error(str(e))
         # print ("Number of connections: {}".format(sum_c))
         #
-        # # sleep for ten secs if nothing happened in the loop
-        # if n_procs == 0:
-        #     sleep(10)

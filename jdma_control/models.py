@@ -524,7 +524,7 @@ class MigrationArchive(models.Model):
         # get the migration
         return "Archive " + str(self.pk)
 
-    def get_file_names(self, prefix=""):
+    def get_file_names(self, prefix="", directories=True):
         """Return a list of files from the archive to be / that have been uploaded.
            If the archive is packed, then return the archive id + ".tar".
            If the archive is not packed then return the files without the
@@ -536,8 +536,18 @@ class MigrationArchive(models.Model):
             return [os.path.join(prefix, self.get_id() + ".tar")]
         else:
             # not packed, return a list of the files in the archive
-            return [os.path.join(prefix,
-                    f.path) for f in self.migrationfile_set.all()]
+            file_list = [os.path.join(prefix,
+                         f.path) for f in self.migrationfile_set.all()]
+            # check whether directories should be returned or not
+            if directories:
+                ret_file_list = file_list
+            else:
+                ret_file_list = []
+                for file_path in file_list:
+                    if not (os.path.isdir(file_path) or
+                            os.path.islink(file_path)):
+                        ret_file_list.append(file_path)
+            return ret_file_list
 
     def get_filtered_file_names(self, prefix="", filelist=None):
         """Return a list of files from the archive to be / that have been uploaded.
