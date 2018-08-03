@@ -62,12 +62,12 @@ def start_upload(backend_object, credentials, pr):
                     prefix = get_staging_dir(backend_object, pr)
                 else:
                     prefix = pr.migration.common_path
-                file_list.extend(archive.get_filtered_file_names(prefix))
+                file_list.extend(archive.get_file_names(prefix, directories=False))
 
             external_id = backend_object.create_upload_batch(
                 conn,
                 pr,
-                file_list  = file_list
+                file_list = file_list
             )
         except Exception as e:
             storage_name = StorageQuota.get_storage_name(
@@ -125,8 +125,7 @@ def upload_batch(backend_object, credentials, pr):
             else:
                 prefix = pr.migration.common_path
             # get the list of files for this archive
-            file_list = archive.get_filtered_file_names(prefix,
-                                                        directories = False)
+            file_list = archive.get_file_names(prefix, directories = False)
             # behave as if uploading each file individually
             # get the archive to upload
             archive = archive_set[arch_num]
@@ -192,7 +191,7 @@ def start_verify(backend_object, credentials, pr):
         file_list = []
         for archive in archive_set:
             # get a list of files, using the relevant prefix
-            file_list.extend(archive.get_filtered_file_names())
+            file_list.extend(archive.get_file_names(directories=False))
 
         transfer_id = backend_object.create_download_batch(
             conn,
@@ -253,7 +252,7 @@ def download_to_verify(backend_object, credentials, pr):
             ).format(pr.migration.external_id))
 
             # get the list of files, without a prefix
-            file_list = archive.get_filtered_file_names()
+            file_list = archive.get_file_names(directories=False)
             file_inc = backend_object.get(
                 conn,
                 pr,
@@ -706,7 +705,7 @@ def get_transfers(backend_object, key):
     return get_count
 
 
-def start_delete(backend_object, dr, credentials):
+def start_delete(backend_object, credentials, dr):
     """Create a delete batch on the external storage.
     Set the last archive to 0.
     Transition to DELETING."""
@@ -758,13 +757,12 @@ def delete_batch(backend_object, credentials, dr):
     # loop over the number of archives
     archive_set = dr.migration.migrationarchive_set.order_by('pk')
     for arch_num in range(st_arch, n_arch):
-        # determine which archive to download and stage (tar)
+        # determine which archive to delete
         archive = archive_set[arch_num]
         try:
-            # use Backend.get to pull back the files to a temporary directory
             logging.info((
                 "Deleting: {}/{}"
-            ).format(dr.migration.external_id, archive_name))
+            ).format(dr.migration.external_id, archive.get_id()))
             backend_object.delete(
                 conn,
                 dr.migration.external_id,
@@ -867,6 +865,8 @@ def process(backend, key):
     If they weren't then put the daemon to sleep for a minute to prevent the
     database being hammerred"""
     backend_object = backend()
+    backend_object.process_transfer()
+
     n_put = put_transfers(backend_object, key)
     n_get = get_transfers(backend_object, key)
     n_del = delete_transfers(backend_object, key)

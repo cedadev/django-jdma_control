@@ -21,7 +21,7 @@ class MigrationArchiveInline(admin.TabularInline):
     extra = 0
     show_change_link = True
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request, obj):
         return False
 
 

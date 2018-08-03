@@ -487,11 +487,11 @@ class MigrationRequestView(View):
                :<jsonarr string name: the user id to use in making the request
                :<jsonarr string workspace: the workspace to use in making the
                request
-               :<jsonarr string request_type: GET | PUT | MIGRATE
+               :<jsonarr string request_type: GET | PUT | MIGRATE | DELETE
                :<jsonarr string filelist: the list of files and directories
                (for PUT or MIGRATE)
                :<jsonarr string label: (*optional*) a human readable label for
-               the request (for PUT, MIGRATE or GET).
+               the request (for PUT, MIGRATE, DELETE or GET).
                  A default will be derived from the original path if no label
                  is supplied in the POST request.
                :<jsonarr int id: the id of the Migration to retrieve (for GET)
@@ -907,8 +907,9 @@ class MigrationRequestView(View):
                     return HttpError(error_data)
 
                 #   3. check the backend exists and is available
+                storage_name = StorageQuota.get_storage_name(migration.storage.storage)
                 JDMA_BACKEND_OBJECT = \
-                    jdma_control.backends.Backend.get_backend_object(data["storage"])
+                    jdma_control.backends.Backend.get_backend_object(storage_name)
                 backend_error = self._check_backend(
                     JDMA_BACKEND_OBJECT,
                     data["storage"],
@@ -1036,8 +1037,6 @@ class MigrationView(View):
                 data["external_id"] = migration.external_id
             if migration.registered_date:
                 data["registered_date"] = migration.registered_date.isoformat()
-            if migration.stage == Migration.FAILED and migration.failure_reason != "":
-                data["failure_reason"] = migration.failure_reason
         else:
             # return details of all the migrations for this user
             keyargs = {"user__name": request.GET.get("name")}
