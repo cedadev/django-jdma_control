@@ -3,7 +3,6 @@
 import os
 from zlib import adler32
 import tempfile
-import socket # needed for ip address
 import tarfile
 
 from django.db.models import Q
@@ -20,10 +19,20 @@ import elastic_tape.shared as ET_shared
 import elastic_tape.shared.storaged_pb2 as ET_proto
 
 import jdma_site.settings as settings
+import socket
 
 # create the connection pool - these are needed for the get transfers, as each
 # transfer thread requires a connection that is kept up
 et_connection_pool = ConnectionPool()
+
+def get_ip_address():
+    """Get an ip address using socket, or fake for testing purposes."""
+    ip = socket.gethostbyname(socket.gethostname())
+    # fake if running on VM
+    if ip == '127.0.0.1':
+        ip = '130.246.189.180'
+    return ip
+
 
 def get_completed_puts():
     """Get all the completed puts for the Elastic Tape"""
@@ -156,8 +165,8 @@ def get_completed_deletes():
         # get a list of synced batches for this workspace and user
         holdings_url = "{}?workspace={};caller={};level=batch".format(
             ET_Settings.ET_HOLDINGS_URL,
-            pr.migration.workspace.workspace,
-            pr.migration.user.name
+            dr.migration.workspace.workspace,
+            dr.migration.user.name
         )
         # use requests to fetch the URL
         r = requests.get(holdings_url)
@@ -169,7 +178,7 @@ def get_completed_deletes():
         # then the delete has completed
         batches = bs.select("batch")
         for b in batches:
-            batch_id = f.find("batch_id").text.strip()
+            batch_id = b.find("batch_id").text.strip()
             if batch_id == dr.migration.external_id:
                 deleted = False
 
@@ -251,58 +260,6 @@ def workspace_quota_remaining(jdma_user, jdma_workspace):
 
     return quota_allocated - quota_used
 
-def run_ET_transfer(backend_object):
-    """Run the transfer from the jdma_monitor process."""
-    # get the ip address
-    ip = socket.gethostbyname(socket.gethostname())
-    try:
-        # See et_transfer_mp for info and original code
-        conn = et_connection_pool.find_or_create_connection(
-            backend_object,
-            mig_req = None,
-            credentials = None,
-            mode="upload"
-        )
-    except Exception as e:
-        raise Exception(e)
-    else:
-
-        try:
-            transfer = conn.getNextTransferrable(PI = ip)
-        except ET_shared.error.StorageDError as e:
-            if e.code == ET_shared.error.ECCHEFUL:
-                # cache is full, do nothing, jdma_monitor will try again later
-                # leave connection open
-                return 0
-            else:
-                # some other error - raise an Exception and the migration will
-                # be set to FAILED
-                et_connection_pool.close_connection(
-                    backend_object,
-                    mig_req = None
-                )
-                raise Exception(e)
-                return 0
-
-        if transfer is None:
-            # leave connection open!
-            return 0
-        else:
-            eList = transfer.verify()
-            n_files = 0
-            if eList:
-                for e in eList:
-                    conn.msgIface.sendError(e)
-            else:
-                transfer.send()
-                n_files = 1
-            et_connection_pool.close_connection(
-                backend_object,
-                mig_req = None
-            )
-            return n_files
-
-
 class ElasticTapeBackend(Backend):
     """Class for a JASMIN Data Migration App backend which targets Elastic Tape.
     Inherits from Backend class and overloads inherited functions."""
@@ -319,11 +276,56 @@ class ElasticTapeBackend(Backend):
         except Exception:
             return False
 
+    def process_transfer(self):
+        """Process a transfer.  For ET this gets the next transferable and then
+        sends it."""
+        # get the ip address
+        ip = get_ip_address()
+        try:
+            # See et_transfer_mp for info and original code
+            conn = et_connection_pool.find_or_create_connection(
+                self,
+                mig_req = None,
+                credentials = None,
+                mode="upload"
+            )
+        except Exception as e:
+            raise Exception(e)
+        else:
+            try:
+                transfer = conn.getNextTransferrable(PI = ip)
+            except ET_shared.error.StorageDError as e:
+                if e.code == ET_shared.error.ECCHEFUL:
+                    # cache is full, do nothing, jdma_monitor will try again later
+                    # leave connection open
+                    return
+                else:
+                    # some other error - raise an Exception and the migration will
+                    # be set to FAILED
+                    et_connection_pool.close_connection(
+                        backend_object,
+                        mig_req = None
+                    )
+                    raise Exception(e)
+
+            if transfer is None:
+                # leave connection open!
+                return
+            else:
+                eList = transfer.verify()
+                if eList:
+                    for e in eList:
+                        conn.msgIface.sendError(e)
+                else:
+                    transfer.send()
+                et_connection_pool.close_connection(
+                    backend_object,
+                    mig_req = None
+                )
+
     def monitor(self, thread_number=None):
         """Determine which batches have completed."""
         try:
-            # first run the transfer
-            n_transfers = run_ET_transfer(self)
             completed_PUTs = get_completed_puts()
             completed_GETs = get_completed_gets()
             completed_DELETEs = get_completed_deletes()
@@ -371,7 +373,7 @@ class ElasticTapeBackend(Backend):
             # get the external id
             external_id = get_req.migration.external_id
             # Get the ip address of the sender
-            ip = socket.gethostbyname(socket.gethostname())
+            ip = get_ip_address()
 
             # create a new batch
             batch = conn.newBatch(conn.jdma_workspace, None)
@@ -541,7 +543,7 @@ class ElasticTapeBackend(Backend):
                 return
 
             # Get the ip address of the sender
-            ip = socket.gethostbyname(socket.gethostname())
+            ip = get_ip_address()
 
             batch_name = put_req.migration.label
             # create a new batch
@@ -579,8 +581,8 @@ class ElasticTapeBackend(Backend):
 
         try:
             # get the next transferrable for this batch and ip address
-            ip = socket.gethostbyname(socket.gethostname())
-            transfer = conn.xTransferrable(
+            ip = get_ip_address()
+            transfer = conn.getNextTransferrable(
                            PI=ip,
                            batchID=int(put_req.migration.external_id)
                        )
@@ -604,7 +606,7 @@ class ElasticTapeBackend(Backend):
         # many files have uploaded so as to sleep or not
         return 1
 
-    def create_delete_batch(self, conn):
+    def create_delete_batch(self, conn, batch_id):
         """Create a batch to delete files from the elastic tape"""
         return None
 
@@ -614,9 +616,9 @@ class ElasticTapeBackend(Backend):
 
     def delete(self, conn, batch_id, archive):
         """Delete a single tarred archive of files from the object store"""
-        conn.deleteBatchByID(conn.jdma_workspace.workspace,
+        conn.deleteBatchByID(conn.jdma_workspace,
                              conn.jdma_user,
-                             batch_id)
+                             int(batch_id))
 
     def user_has_put_permission(self, conn):
         """Check whether the user has permission to access the elastic tape,

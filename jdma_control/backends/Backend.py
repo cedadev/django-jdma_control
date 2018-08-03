@@ -62,6 +62,11 @@ class Backend(object):
         """
         return True
 
+    def process_transfer(self):
+        """Process a transfer to the external storage.  This is for any functions
+        that have to run (in a loop) to facilitate the transfer."""
+        raise NotImplementedError
+
     def monitor(self):
         """Monitor the external storage, return which requests have completed"""
         raise NotImplementedError
@@ -109,7 +114,7 @@ class Backend(object):
         create_batch function) on the external storage"""
         raise NotImplementedError
 
-    def create_delete_batch(self, conn):
+    def create_delete_batch(self, conn, batch_id):
         """Create a batch for deleting files from the external storage"""
         raise NotImplementedError
 

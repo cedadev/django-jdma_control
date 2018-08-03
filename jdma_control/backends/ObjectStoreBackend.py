@@ -203,6 +203,11 @@ class ObjectStoreBackend(Backend):
         except Exception:
             return False
 
+    def process_transfer(self):
+        """Process a transfer to the external storage.  This is for any functions
+        that have to run (in a loop) to facilitate the transfer."""
+        return
+
     def monitor(self):
         """Determine which batches have completed."""
         try:
