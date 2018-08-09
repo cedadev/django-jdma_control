@@ -42,7 +42,8 @@ def start_upload(backend_object, credentials, pr):
             backend_object,
             pr,
             credentials,
-            mode="upload"
+            mode="upload",
+            uid = "PUT"
         )
         # Use the Backend stored in settings.JDMA_BACKEND_OBJECT to create the
         # batch
@@ -107,7 +108,8 @@ def upload_batch(backend_object, credentials, pr):
         backend_object,
         pr,
         credentials,
-        mode="upload"
+        mode="upload",
+        uid="PUT"
     )
     st_arch = pr.last_archive
     n_arch = pr.migration.migrationarchive_set.count()
@@ -170,7 +172,8 @@ def start_verify(backend_object, credentials, pr):
         backend_object,
         pr,
         credentials,
-        mode="download"
+        mode="download",
+        uid="VERIFY"
     )
     # Use the Backend stored in settings.JDMA_BACKEND_OBJECT to create the
     # batch
@@ -232,7 +235,8 @@ def download_to_verify(backend_object, credentials, pr):
         backend_object,
         pr,
         credentials,
-        mode="download"
+        mode="download",
+        uid="VERIFY"
     )
     # start at the last_archive so that interrupted uploads can be resumed
     st_arch = pr.last_archive
@@ -280,7 +284,8 @@ def start_download(backend_object, credentials, gr):
         backend_object,
         gr,
         credentials,
-        mode="download"
+        mode="download",
+        uid="GET"
     )
 
     try:
@@ -355,7 +360,8 @@ def download_batch(backend_object, credentials, gr):
         backend_object,
         gr,
         credentials,
-        mode="download"
+        mode="download",
+        uid="GET"
     )
     try:
         # we just (potentially) want to get a subset of archives
@@ -432,7 +438,6 @@ def put_transfers(backend_object, key):
     )
     # for each PUT request get the Migration and determine the type of the
     # Migration
-    global connection_pool
     put_count = 0
     for pr in put_reqs:
         # check for lock
@@ -451,13 +456,6 @@ def put_transfers(backend_object, key):
             # create the batch on this instance, next time the script is run
             # the archives will be created as tarfiles
             try:
-                # create the connection
-                conn = connection_pool.find_or_create_connection(
-                    backend_object,
-                    pr,
-                    credentials,
-                    mode="upload"
-                )
                 start_upload(backend_object, credentials, pr)
                 put_count += 1
             except Exception as e:
@@ -465,7 +463,7 @@ def put_transfers(backend_object, key):
                 mark_migration_failed(pr, str(e), e)
         # between these stages PUT_PACKING occurs in jdma_pack
         elif pr.stage == MigrationRequest.PUTTING:
-        # in the process of putting
+            # in the process of putting
             try:
                 # connection is created - find_or_create_connection will find it
                 # in the upload_batch function
@@ -478,18 +476,6 @@ def put_transfers(backend_object, key):
         # back for verification
         elif pr.stage == MigrationRequest.VERIFY_PENDING:
             try:
-                # close the upload connection - we are finished with it
-                connection_pool.close_connection(
-                    backend_object,
-                    pr
-                )
-                # create the new download connection
-                conn = connection_pool.find_or_create_connection(
-                    backend_object,
-                    pr,
-                    credentials,
-                    mode="download"
-                )
                 put_count += 1
                 start_verify(backend_object, credentials, pr)
             except Exception as e:
@@ -505,12 +491,8 @@ def put_transfers(backend_object, key):
             except Exception as e:
                 # Something went wrong, set FAILED and failure_reason
                 mark_migration_failed(pr, str(e), e)
-        # close the connection when state becomes VERIFYING
         elif pr.stage == MigrationRequest.VERIFYING:
-            connection_pool.close_connection(
-                backend_object,
-                pr,
-            )
+            pass
         # unlock
         pr.unlock()
     return put_count
@@ -645,7 +627,6 @@ def get_transfers(backend_object, key):
 
     # for each GET request get the Migration and determine if the type of the
     # Migration is GET_PENDING
-    global connection_pool
     get_count = 0
     for gr in get_reqs:
         # check for lock
@@ -663,13 +644,6 @@ def get_transfers(backend_object, key):
             # for elastic tape.  Also create the directory and transition the
             # state
             try:
-                # create the new download connection
-                conn = connection_pool.find_or_create_connection(
-                    backend_object,
-                    gr,
-                    credentials,
-                    mode="download"
-                )
                 start_download(backend_object, credentials, gr)
                 get_count += 1
             except Exception as e:
@@ -690,11 +664,6 @@ def get_transfers(backend_object, key):
 
         elif gr.stage == MigrationRequest.GET_RESTORE:
             # restore the file permissions
-            # close the connection - we have finished with it the new download connection
-            connection_pool.close_connection(
-                backend_object,
-                gr,
-            )
             try:
                 get_count += 1
                 restore_owner_and_group(backend_object, gr, ldap_conn)
@@ -714,7 +683,8 @@ def start_delete(backend_object, credentials, dr):
         backend_object,
         dr,
         credentials,
-        mode="delete"
+        mode="delete",
+        uid="DELETE"
     )
     dr.migration.last_archive = 0
     dr.migration.save()
@@ -731,7 +701,8 @@ def delete_batch(backend_object, credentials, dr):
         backend_object,
         dr,
         credentials,
-        mode="delete"
+        mode="delete",
+        uid="DELETE"
     )
     # get the storage id for the backend object
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
@@ -914,8 +885,8 @@ def run(*args):
             # sleep for ten secs if nothing happened in the loop
             if n_procs == 0:
                 sleep(10)
-        #except Exception as e:
         else:
+        #except Exception as e:
             # catch all exceptions as we want this to run in a loop for all
             # backends and transfers - we don't want one transfer to crash out
             # the transfer daemon with a single bad transfer!

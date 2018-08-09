@@ -65,7 +65,7 @@ class MigrationRequestAdmin(admin.ModelAdmin):
               'target_path', 'credentials', 'last_archive', 'failure_reason',
               'formatted_filelist', 'transfer_id', 'locked')
     readonly_fields = ('link_to_migration', 'credentials', #'last_archive',
-                       'failure_reason', 'formatted_filelist', 'transfer_id')
+                       'formatted_filelist', 'transfer_id')
     search_fields = ('user',)
 
     def link_to_migration(self, obj):

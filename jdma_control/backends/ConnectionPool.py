@@ -1,6 +1,7 @@
 """A container class to create and access connections to the various
 backends."""
 import jdma_control.backends
+import jdma_site.settings as settings
 
 class ConnectionPool:
     """A container class to create and access connections to the various
@@ -8,18 +9,24 @@ class ConnectionPool:
     def __init__(self):
         self.pool = {}
 
-    def __get_connection_id(connection_id, thread_number, mode="upload"):
-        if thread_number == None:
-            new_connection_id = "{}_{}".format(
+    def __get_connection_id(connection_id,
+                            thread_number="",
+                            uid="",
+                            mode="upload"):
+        if thread_number != None:
+            new_connection_id = "{}_{}_{}_{}".format(
                 str(connection_id),
+                str(thread_number),
+                str(uid),
                 mode
             )
         else:
             new_connection_id = "{}_{}_{}".format(
                 str(connection_id),
-                mode,
-                str(thread_number)
+                str(uid),
+                mode
             )
+
         return new_connection_id
 
 
@@ -28,7 +35,8 @@ class ConnectionPool:
                                   mig_req = None,
                                   credentials = None,
                                   mode="upload",
-                                  thread_number=None
+                                  thread_number=None,
+                                  uid=""
         ):
         """The connection pool is a dictionary of connections, with a connection
            id as the key:
@@ -47,6 +55,7 @@ class ConnectionPool:
         connection_id = ConnectionPool.__get_connection_id(
             connection_number,
             thread_number,
+            uid,
             mode,
         )
         if backend_id not in self.pool:
@@ -57,14 +66,16 @@ class ConnectionPool:
                 credentials,
                 mode
             )
-            #print("Creating connection_id {}".format(connection_id))
+            if settings.TESTING:
+                print("Creating new connection_id {}".format(connection_id))
             conn_dict = {connection_id : conn}
             self.pool[backend_id] = conn_dict
         else:
             # search for mig_req.pk in the backend
             if connection_id in self.pool[backend_id]:
                 # found
-                #print("Using connection_id {}".format(connection_id))
+                if settings.TESTING:
+                    print("Using connection_id {}".format(connection_id))
                 conn = self.pool[backend_id][connection_id]
             else:
                 # not found, so create and return
@@ -75,7 +86,8 @@ class ConnectionPool:
                     credentials,
                     mode
                 )
-                #print("Creating new connection_id {}".format(connection_id))
+                if settings.TESTING:
+                    print("Creating new connection_id {}".format(connection_id))
                 self.pool[backend_id][connection_id] = conn
         return conn
 
@@ -83,7 +95,10 @@ class ConnectionPool:
     def close_connection(self,
                          backend_object,
                          mig_req = None,
-                         thread_number=None
+                         credentials = None,
+                         mode="upload",
+                         thread_number=None,
+                         uid=""
         ):
         """Close the connection and remove it from the dictionary for the
         backend."""
@@ -94,12 +109,15 @@ class ConnectionPool:
             connection_number = 0
         thread_id = ConnectionPool.__get_connection_id(
             connection_number,
-            thread_number
+            thread_number,
+            uid,
+            mode
         )
         if backend_id in self.pool and thread_id in self.pool[backend_id]:
             backend_object.close_connection(self.pool[backend_id][thread_id])
             self.pool[backend_id].pop(thread_id)
-            #print("Closing connection {}".format(thread_id))
+            if settings.TESTING:
+                print("Closing connection {}".format(thread_id))
 
 
     def close_all_connections(self):
