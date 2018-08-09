@@ -34,7 +34,7 @@ def get_ip_address():
     return ip
 
 
-def get_completed_puts():
+def get_completed_puts(backend_object):
     """Get all the completed puts for the Elastic Tape"""
     # avoiding a circular dependency
     from jdma_control.models import MigrationRequest, Migration, StorageQuota
@@ -92,7 +92,7 @@ def get_completed_puts():
     return completed_PUTs
 
 
-def get_completed_gets():
+def get_completed_gets(backend_object):
     # avoiding a circular dependency
     from jdma_control.models import MigrationRequest, StorageQuota, MigrationArchive
     # get the storage id
@@ -145,7 +145,7 @@ def get_completed_gets():
     return completed_GETs
 
 
-def get_completed_deletes():
+def get_completed_deletes(backend_object):
     """Get all the completed deletes for the ObjectStore"""
     # avoiding a circular dependency
     from jdma_control.models import MigrationRequest, Migration, StorageQuota    # get the storage id
@@ -278,7 +278,8 @@ class ElasticTapeBackend(Backend):
 
     def process_transfer(self):
         """Process a transfer.  For ET this gets the next transferable and then
-        sends it."""
+        sends it.
+        Could run multiple of these in threads."""
         # get the ip address
         ip = get_ip_address()
         try:
@@ -287,29 +288,35 @@ class ElasticTapeBackend(Backend):
                 self,
                 mig_req = None,
                 credentials = None,
-                mode="upload"
+                mode="upload",
+                uid="TRANSFER"
             )
         except Exception as e:
             raise Exception(e)
         else:
             try:
                 transfer = conn.getNextTransferrable(PI = ip)
+                print(transfer)
             except ET_shared.error.StorageDError as e:
                 if e.code == ET_shared.error.ECCHEFUL:
                     # cache is full, do nothing, jdma_monitor will try again later
-                    # leave connection open
+                    print ("Cache full")
                     return
                 else:
                     # some other error - raise an Exception and the migration will
                     # be set to FAILED
                     et_connection_pool.close_connection(
-                        backend_object,
-                        mig_req = None
+                        self,
+                        mig_req = None,
+                        mode = "upload",
+                        uid="TRANSFER"
                     )
                     raise Exception(e)
+            except Exception as e:
+                raise Exception(e)
 
             if transfer is None:
-                # leave connection open!
+                # leave the connection open
                 return
             else:
                 eList = transfer.verify()
@@ -318,17 +325,19 @@ class ElasticTapeBackend(Backend):
                         conn.msgIface.sendError(e)
                 else:
                     transfer.send()
-                et_connection_pool.close_connection(
-                    backend_object,
-                    mig_req = None
-                )
+            et_connection_pool.close_connection(
+                self,
+                mig_req = None,
+                mode = "upload",
+                uid="TRANSFER"
+            )
 
     def monitor(self, thread_number=None):
         """Determine which batches have completed."""
         try:
-            completed_PUTs = get_completed_puts()
-            completed_GETs = get_completed_gets()
-            completed_DELETEs = get_completed_deletes()
+            completed_PUTs = get_completed_puts(self)
+            completed_GETs = get_completed_gets(self)
+            completed_DELETEs = get_completed_deletes(self)
             # pause if no transfers
         except Exception as e:
             raise Exception(e)
@@ -412,21 +421,38 @@ class ElasticTapeBackend(Backend):
         """
         # avoid a circular dependancy
         from jdma_control.models import MigrationRequest, StorageQuota
+
         # get the storage id for the backend object
         storage_id = StorageQuota.get_storage_index(self.get_id())
-        # The ET library requires a separate connection for each download, and
-        # a marshalling connection (which is conn)
+
         # global et_connection_pool
         new_conn = et_connection_pool.find_or_create_connection(
             self,
             get_req,
             None,       # are credentials needed?
-            mode="download",
-            thread_number=thread_number
+            mode = "download",
+            thread_number = thread_number,
+            uid="ET_GET"
         )
 
+        # convert request id in get request to an integer, required by ET library
+        req_ID = int(get_req.transfer_id)
+
+        # see if request has finished
+        try:
+            if conn.msgIface.checkRRComplete(req_ID):
+                badFiles = conn.msgIface.FinishRR(req_ID)
+                if len(badFiles) != 0:
+                    raise Exception(
+                        "Badfiles in elastic_tape::get, transfer_id: {}".format(
+                            req_ID
+                        )
+                    )
+        except:
+            pass
+
         # get the next processable / transferrable tar file
-        new_conn.msgIface.sendNextProcessable(int(get_req.transfer_id))
+        new_conn.msgIface.sendNextProcessable(req_ID)
         # read the files to transfer
         trans_data = new_conn.msgIface.readFiles()
         # if trans_data is None or data is finished then exit. As the transfer
@@ -436,18 +462,18 @@ class ElasticTapeBackend(Backend):
             # leave the connection open
             return 0
 
-        # check
-        if conn.msgIface.checkRRComplete(int(get_req.transfer_id)):
-            # close the transfer
-            badFiles = conn.msgIface.FinishRR(int(get_req.transfer_id))
-            return 0
-
         if trans_data.finished:
             # finished - just return
             return 0
 
         if trans_data.errored:
-            et_connection_pool.close_connection()
+            et_connection_pool.close_connection(
+                self,
+                get_req,
+                mode = "download",
+                thread_number = thread_number,
+                uid="ET_GET"
+            )
             raise Exception("Error in ElasticTapeBackend::get")
 
         # check that type is "CLIENT_TAR" - it should be as all transfers are
@@ -578,32 +604,32 @@ class ElasticTapeBackend(Backend):
         Here we add to the conn.files list of files, which the names of are
         all uploaded on close_upload_batch
         """
-
-        try:
-            # get the next transferrable for this batch and ip address
-            ip = get_ip_address()
-            transfer = conn.getNextTransferrable(
-                           PI=ip,
-                           batchID=int(put_req.migration.external_id)
-                       )
-            # Handle the transfer
-            if transfer is None:
-                return 0
-            else:
-                transfer.send()
-        except ET_shared.error.StorageDError as e:
-            if e.code == ET_shared.error.ECCHEFUL:
-                # cache is full, do nothing, jdma_transfer will try again later
-                return 0
-            else:
-                # some other error - raise an Exception and the migration will
-                # be set to FAILED
-                raise Exception(e)
-        except Exception as e:
-            raise Exception(e)
-        # return one for the last_archive count - ET does not need this to keep
-        # a count of which archives have uploaded, but we need to know how
-        # many files have uploaded so as to sleep or not
+        # all of this code is now duplicated in process_transfer
+        # try:
+        #     # get the next transferrable for this batch and ip address
+        #     ip = get_ip_address()
+        #     transfer = conn.getNextTransferrable(
+        #                    PI=ip,
+        #                    batchID=int(put_req.migration.external_id)
+        #                )
+        #     # Handle the transfer
+        #     if transfer is None:
+        #         return 0
+        #     else:
+        #         transfer.send()
+        # except ET_shared.error.StorageDError as e:
+        #     if e.code == ET_shared.error.ECCHEFUL:
+        #         # cache is full, do nothing, jdma_transfer will try again later
+        #         return 0
+        #     else:
+        #         # some other error - raise an Exception and the migration will
+        #         # be set to FAILED
+        #         raise Exception(e)
+        # except Exception as e:
+        #     raise Exception(e)
+        # # return one for the last_archive count - ET does not need this to keep
+        # # a count of which archives have uploaded, but we need to know how
+        # # many files have uploaded so as to sleep or not
         return 1
 
     def create_delete_batch(self, conn, batch_id):
