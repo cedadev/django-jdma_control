@@ -347,6 +347,11 @@ class ElasticTapeBackend(Backend):
         """Should the data be packed into a tarfile for this backend?"""
         return False
 
+    def piecewise_upload(self):
+        """For elastic tape the data shouldn't be uploaded archive by archive
+        but uploaded all at once."""
+        return False
+
     def create_connection(self, user, workspace, credentials, mode="upload"):
         """Create connection to Elastic Tape, using the supplied credentials.
         (There are no required credentials!)

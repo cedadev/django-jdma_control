@@ -25,8 +25,8 @@ to carry out two operations on a single Migration.
 
 For PUT requests:
 1.  PUT_START
-2.  PUT_PENDING
-3.  PUT_PACK
+2.  PUT_PACKING
+3.  PUT_PENDING
 4.  PUTTING
 5.  VERIFY_PENDING
 6.  VERIFY_GETTING

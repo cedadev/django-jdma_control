@@ -529,9 +529,10 @@ class MigrationArchive(models.Model):
            If the archive is packed, then return the archive id + ".tar".
            If the archive is not packed then return the files without the
              common path prefix.
-           This function will return all of the files in the archive, including
+           This function can return all of the files in the archive, including
            the directories.  This is necessary, for the restore procedure, to
-           restore the permissions of the directories."""
+           restore the permissions of the directories.
+           Alternatively, directories can be filtered out using directories=False"""
         if self.packed:
             return [os.path.join(prefix, self.get_id() + ".tar")]
         else:

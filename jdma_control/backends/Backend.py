@@ -62,17 +62,17 @@ class Backend(object):
         """
         return True
 
-    def process_transfer(self):
-        """Process a transfer to the external storage.  This is for any functions
-        that have to run (in a loop) to facilitate the transfer."""
-        raise NotImplementedError
-
     def monitor(self):
         """Monitor the external storage, return which requests have completed"""
         raise NotImplementedError
 
     def pack_data(self):
         """Should the data be packed into a tarfile for this backend?"""
+        raise NotImplementedError
+
+    def piecewise(self):
+        """Should the data be uploaded piecewise (archive by archive) or
+        all at once?"""
         raise NotImplementedError
 
     def create_connection(self, user, workspace, credentials, mode="upload"):
@@ -86,44 +86,18 @@ class Backend(object):
         """Close the connection to the backend"""
         raise NotImplementedError
 
-    def create_download_batch(self, conn, get_req, file_list=[]):
-        """Create a batch for download from the external storage and return the
-        transfer id"""
+    def download_files(self, conn, get_req, file_list, target_dir):
+        """Create a batch for download from a batch on the external storage,
+        download the files and return the transfer id from the external storage"""
         raise NotImplementedError
 
-    def close_download_batch(self, conn, transfer_id):
-        """Close the download batch on the external storage"""
+    def upload_files(self, conn, put_req, prefix, file_list):
+        """Create a batch for upload to the external storage, upload the files
+        and return the batch id"""
         raise NotImplementedError
 
-    def get(self, conn, get_req, file_list, target_dir):
-        """Get the batch from the external storage and download to a
-        target_dir"""
-        raise NotImplementedError
-
-    def create_upload_batch(self, conn, put_req, file_list=[]):
-        """Create a batch for upload to the external storage and return the
-        batch id"""
-        raise NotImplementedError
-
-    def close_upload_batch(self, conn, batch_id):
-        """Close the upload batch on the external storage"""
-        raise NotImplementedError
-
-    def put(self, conn, put_req, file_list, packed=False):
-        """Put a list of archive files into a batch (created using
-        create_batch function) on the external storage"""
-        raise NotImplementedError
-
-    def create_delete_batch(self, conn, batch_id):
-        """Create a batch for deleting files from the external storage"""
-        raise NotImplementedError
-
-    def close_delete_batch(self, conn, batch_id):
-        """Close the delete batch on the external storage"""
-        raise NotImplementedError
-
-    def delete(self, conn, del_req, archive):
-        """Delete a single tarred archive of files from the external storage"""
+    def delete_batch(self, conn, batch_id):
+        """Delete a batch from the external storage"""
         raise NotImplementedError
 
     # permissions / quota
