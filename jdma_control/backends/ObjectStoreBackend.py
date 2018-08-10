@@ -203,11 +203,6 @@ class ObjectStoreBackend(Backend):
         except Exception:
             return False
 
-    def process_transfer(self):
-        """Process a transfer to the external storage.  This is for any functions
-        that have to run (in a loop) to facilitate the transfer."""
-        return
-
     def monitor(self):
         """Determine which batches have completed."""
         try:
@@ -220,6 +215,11 @@ class ObjectStoreBackend(Backend):
 
     def pack_data(self):
         """Should the data be packed into a tarfile for this backend?"""
+        return False
+
+    def piecewise(self):
+        """For the object store each archive can be uploaded one by one
+        and uploads can be resumed."""
         return True
 
     def create_connection(self, user, workspace, credentials, mode="upload"):
@@ -236,19 +236,14 @@ class ObjectStoreBackend(Backend):
         """
         return
 
-    def create_download_batch(self, conn, get_req, file_list=[]):
-        """Do nothing for object store."""
-        return get_req.migration.external_id
-
-    def close_download_batch(self, conn, transfer_id):
-        """Do nothing for object store."""
-        return
-
-    def get(self, conn, get_req, file_list, target_dir):
+    def download_files(self, conn, get_req, file_list, target_dir):
         """Download a batch of files from the Object Store to a target
         directory.
         """
+        get_req.transfer_id = get_req.migration.external_id
+        get_req.save()
         for object_name in file_list:
+            # external id is the bucket name, add this to the file name
             download_file_path = os.path.join(target_dir, object_name)
             # check that the the sub path exists
             sub_path = os.path.split(download_file_path)[0]
@@ -264,11 +259,11 @@ class ObjectStoreBackend(Backend):
             )
         return len(file_list)
 
-    def create_upload_batch(self, conn, put_req, file_list=[]):
-        """Create a batch on the object store and return the batch id.
-        For the object store the batch id is the groupworkspace name appended
-        with the next batch number for that groupworkspace.
-        """
+    def __get_new_bucket_name(self, conn):
+        """Get the name of the new bucket, using the information in the conn
+        object to connect to the object store and the group workspace.
+        The name of the bucket is the groupworkspace name appended with the next
+        batch number for that groupworkspace."""
         gws_bucket_prefix = "gws-" + conn.jdma_workspace + "-"
         # list all the buckets and filter those that contain the bucket prefix
         # find the highest number suffix
@@ -290,52 +285,35 @@ class ObjectStoreBackend(Backend):
 
             # create the bucket name: format c_id to 10 digits
             bucket_name = "{}{:010}".format(gws_bucket_prefix, batch_id)
-            # create the bucket
-            conn.create_bucket(Bucket=bucket_name)
-            # need some ACL to control access to the bucket - limit to users in
-            # the group workspace
-            batch_id = bucket_name
+            # really, we need some ACL to control access to the bucket - limit
+            # to users in the group workspace
         except Exception as e:
-            batch_id = None
+            bucket_name = None
             raise Exception(str(e))
 
-        return batch_id
+        return bucket_name
 
-    def close_upload_batch(self, conn, batch_id):
-        """Close the batch on the external storage.
-           Not needed for object store"""
-        return
+    def upload_files(self, conn, put_req, prefix, file_list):
+        """Put an archive, or part of an archive, with paths in file_list onto
+        the Object Store."""
+        # get the bucket name and save to the external id - if the external id
+        # is currently none
+        if put_req.migration.external_id is None:
+            bucket_name = self.__get_new_bucket_name(conn)
+            conn.create_bucket(Bucket=bucket_name)
+            put_req.migration.external_id = bucket_name
+            put_req.migration.save()
 
-    def put(self, conn, put_req, file_list, packed=False):
-        """Put a staged archive (with paths in file_list) onto the Object Store"""
-        if packed:
-            # get the last part of the path - packed archives have 1 entry in
-            # file_list
-            path_split = os.path.split(file_list[0])
-            object_name = path_split[-1]
+        # we have multiple files so create the archive path
+        for archive_path in file_list:
+            object_name = os.path.relpath(archive_path, prefix)
             conn.upload_file(archive_path,
                              put_req.migration.external_id,
                              object_name)
-        else:
-            # we have multiple files so create the archive path
-            for archive_path in file_list:
-                object_name = os.path.relpath(archive_path,
-                                              put_req.migration.common_path)
-                conn.upload_file(archive_path,
-                                 put_req.migration.external_id,
-                                 object_name)
         return len(file_list)
 
-    def create_delete_batch(self, conn):
-        """Do nothing on the object store"""
-        return None
-
-    def close_delete_batch(self, conn, batch_id):
-        """Delete the bucket when the batch is deleted"""
-        conn.delete_bucket(Bucket=batch_id)
-
-    def delete(self, conn, batch_id, archive):
-        """Delete a single tarred archive of files from the object store"""
+    def delete_batch(self, conn, batch_id):
+        """Delete a whole batch from the object store"""
         object_name = archive
         conn.delete_object(Bucket=batch_id, Key=object_name)
 

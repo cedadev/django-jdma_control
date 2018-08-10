@@ -32,44 +32,117 @@ from jdma_control.backends.ConnectionPool import ConnectionPool
 
 connection_pool = ConnectionPool()
 
-def start_upload(backend_object, credentials, pr):
+def upload(backend_object, credentials, pr):
     # check we actually have some files to archive first
-    if pr.migration.migrationarchive_set.all().count() != 0:
-        # open a connection to the backend.  Creating the connection can account
-        # for a significant portion of the run time.  So we only do it once!
-        global connection_pool
-        conn = connection_pool.find_or_create_connection(
-            backend_object,
-            pr,
-            credentials,
-            mode="upload",
-            uid = "PUT"
-        )
-        # Use the Backend stored in settings.JDMA_BACKEND_OBJECT to create the
-        # batch
+    if pr.migration.migrationarchive_set.all().count() == 0:
+        error_string = (
+            "No files in PUT or MIGRATE request: {} PUT_PENDING->FAILED"
+        ).format(pr.migration.formatted_filelist()[0] + "...")
+        raise Exception(error_string)
+    else:
         try:
-            # get the archive set here and supply it to the backend object as
-            # a filelist - this is for backends such as ElasticTape which
-            # require the filelist at the beginning
-
-            # get the archive set
-            archive_set = pr.migration.migrationarchive_set.order_by('pk')
-            # empty file list
-            file_list = []
-            for archive in archive_set:
-                # get a list of files, using the relevant prefix
-                if archive.packed:
-                    # concat the directory path for the batch (internal_id)
-                    prefix = get_staging_dir(backend_object, pr)
-                else:
-                    prefix = pr.migration.common_path
-                file_list.extend(archive.get_file_names(prefix, directories=False))
-
-            external_id = backend_object.create_upload_batch(
-                conn,
+            # open a connection to the backend.  Creating the connection can account
+            # for a significant portion of the run time.  So we only do it once!
+            global connection_pool
+            conn = connection_pool.find_or_create_connection(
+                backend_object,
                 pr,
-                file_list = file_list
+                credentials,
+                mode="upload",
+                uid = "PUT"
             )
+            # There are two types of backends - piecewise and non-piecewise
+            # piecewise (ObjectStore, FTP) allows you to upload archive by
+            # archive and resume uploads.
+            # Non-piecewise (ElasticTape) does not allow to upload archive by
+            # archive and requires all of the files to be uploaded at once.
+            # Non-piecewise also does not support resumin interrupted uploads.
+
+            # transition the stage from PUT_PACKING->PUTTING
+            pr.migration.stage = Migration.PUTTING
+            pr.stage = MigrationRequest.PUTTING
+            pr.migration.save()
+            pr.save()
+            logging.info((
+                "Transition: batch ID: {} PUT_PACKING->PUTTING"
+            ).format(pr.migration.external_id))
+
+            # get the archive set here as it might change if we get it in the loop
+            archive_set = pr.migration.migrationarchive_set.order_by('pk')
+
+            if backend_object.piecewise():
+                st_arch = pr.last_archive
+                n_arch = pr.migration.migrationarchive_set.count()
+                # loop over the archives
+                for arch_num in range(st_arch, n_arch):
+                    # get the archive from the archive number
+                    archive = archive_set[arch_num]
+                    # check whether the archive is packed
+                    if archive.packed:
+                        prefix = get_staging_dir(backend_object, pr)
+                    else:
+                        prefix = pr.migration.common_path
+                    # get the list of files for this archive
+                    file_list = archive.get_file_names(
+                        prefix,
+                        directories = False
+                    )
+                    # log message
+                    logging.info((
+                        "Uploading files: {} to {}"
+                    ).format(file_list, backend_object.get_name()))
+                    # upload objects in filelist
+                    file_inc = backend_object.upload_files(
+                        conn,
+                        pr,
+                        prefix,
+                        file_list
+                    )
+                    # inc archive if all files went up
+                    if int(file_inc == len(file_list)):
+                        pr.last_archive += 1
+                        pr.save()
+            else:
+                # get the archive set - add all files to the filelist
+                file_list = []
+                for archive in archive_set:
+                    # get a list of files, using the relevant prefix
+                    if archive.packed:
+                        # concat the directory path for the batch (internal_id)
+                        prefix = get_staging_dir(backend_object, pr)
+                    else:
+                        prefix = pr.migration.common_path
+                    # add files in this archive to those already added
+                    archive_files = archive.get_file_names(
+                        prefix,
+                        directories=False
+                    )
+                    file_list.extend(archive_files)
+                # log message
+                logging.info((
+                    "Uploading files: {} to {}"
+                ).format(file_list, backend_object.get_name()))
+                # Upload filelist
+                file_inc = backend_object.upload_files(
+                    conn,
+                    pr,
+                    prefix,
+                    file_list
+                )
+                # inc archive if all files went up
+                if int(file_inc == len(file_list)):
+                    pr.last_archive += 1
+                    pr.save()
+
+            # close the connection in the pool
+            conn = connection_pool.close_connection(
+                backend_object,
+                pr,
+                credentials,
+                mode="upload",
+                uid = "PUT"
+            )
+
         except Exception as e:
             storage_name = StorageQuota.get_storage_name(
                 pr.migration.storage.storage
@@ -79,105 +152,31 @@ def start_upload(backend_object, credentials, pr):
                 "on external storage: {}. Exception: {}"
             ).format(pr.migration.pk, storage_name, str(e))
             raise Exception(error_string)
-        else:
-            pr.migration.external_id = external_id
-            pr.migration.stage = Migration.PUTTING
-            pr.stage = MigrationRequest.PUTTING
-            pr.migration.save()
-            pr.save()
-            logging.info((
-                "Transition: batch ID: {} PUT_PENDING->PUT_PACKING"
-            ).format(pr.migration.external_id))
-    else:
-        error_string = (
-            "No files in PUT or MIGRATE request: {} PUT_PENDING->FAILED"
-        ).format(pr.migration.formatted_filelist()[0] + "...")
-        raise Exception(error_string)
-    return external_id
 
 
-def upload_batch(backend_object, credentials, pr):
-    """Upload the batch, taking turns to upload a single archive at once."""
-    # the batch has been created, the archives have been created (in jdma_pack)
-    # upload the archives to the external storage
-    # open a connection to the backend.  Creating the connection can account
-    # for a significant portion of the run time.  So we only do it once for each
-    # migration request!
-    global connection_pool
-    conn = connection_pool.find_or_create_connection(
-        backend_object,
-        pr,
-        credentials,
-        mode="upload",
-        uid="PUT"
-    )
-    st_arch = pr.last_archive
-    n_arch = pr.migration.migrationarchive_set.count()
-    # get the archive set here as it might change if we get it in the loop
-    archive_set = pr.migration.migrationarchive_set.order_by('pk')
-    # loop over the archives
-    archive_inc = 0
-    for arch_num in range(st_arch, n_arch):
-        try:
-            # determine which to upload
-            archive = archive_set[arch_num]
-            # check whether the archive is packed
-            if archive.packed:
-                prefix = get_staging_dir(backend_object, pr)
-            else:
-                prefix = pr.migration.common_path
-            # get the list of files for this archive
-            file_list = archive.get_file_names(prefix, directories = False)
-            # behave as if uploading each file individually
-            # get the archive to upload
-            archive = archive_set[arch_num]
-            # log message
-            logging.info((
-                "Uploading files: {} to {}"
-            ).format(file_list, backend_object.get_name()))
-            # upload object
-            file_inc = backend_object.put(conn, pr, file_list,
-                                           archive.packed)
-            # inc archive if all files went up
-            archive_inc += int(file_inc == len(file_list))
-
-        except Exception as e:
-            raise Exception(e)
-
-    # add to last archive
-    if archive_inc > 0:
-        pr.last_archive += archive_inc
-        pr.save()
-
-    # close the batch on the external storage - for ET this will trigger the
-    # transport
-    backend_object.close_upload_batch(
-        conn,
-        pr.migration.external_id
-    )
-
-    # monitoring is handled by jdma_monitor, which will transition
-    # PUTTING->VERIFY_PENDING when the batch has finished uploading
-    return archive_inc
-
-def start_verify(backend_object, credentials, pr):
+def verify(backend_object, credentials, pr):
     """Start the verification process.  Transition from
     VERIFY_PENDING->VERIFY_GETTING and create the target directory.
-    Create a download batch on the backend storage
+    Download the batch from the backend storage to the target directory
     """
-    # open a connection to the backend.  Creating the connection can account
-    # for a significant portion of the run time.  So we only do it once!
-    global connection_pool
-    conn = connection_pool.find_or_create_connection(
-        backend_object,
-        pr,
-        credentials,
-        mode="download",
-        uid="VERIFY"
-    )
-    # Use the Backend stored in settings.JDMA_BACKEND_OBJECT to create the
-    # batch
     try:
+        # open a connection to the backend.  Creating the connection can account
+        # for a significant portion of the run time.  So we only do it once!
+        global connection_pool
+        conn = connection_pool.find_or_create_connection(
+            backend_object,
+            pr,
+            credentials,
+            mode="download",
+            uid="VERIFY"
+        )
+        # Transition
+        pr.stage = MigrationRequest.VERIFY_GETTING
+        pr.save()
+        logging.info((
+            "Transition: batch ID: {} VERIFY_PENDING->VERIFY_GETTING"
+        ).format(pr.migration.external_id))
+
         # get the name of the verification directory
         target_dir = get_verify_dir(backend_object, pr)
         # create the target directory if it doesn't exist
@@ -193,102 +192,54 @@ def start_verify(backend_object, credentials, pr):
         # add all the files in the archive to a file_list for downloading
         file_list = []
         for archive in archive_set:
-            # get a list of files, using the relevant prefix
-            file_list.extend(archive.get_file_names(directories=False))
+            # add files in this archive to those already added
+            archive_files = archive.get_filtered_file_names(prefix="")
+            file_list.extend(archive_files)
 
-        transfer_id = backend_object.create_download_batch(
+        backend_object.download_files(
             conn,
             pr,
             file_list = file_list,
+            target_dir = target_dir
+        )
+        conn = connection_pool.close_connection(
+            backend_object,
+            pr,
+            credentials,
+            mode="download",
+            uid="VERIFY"
         )
     except Exception as e:
         storage_name = StorageQuota.get_storage_name(
             pr.migration.storage.storage
         )
         error_string = (
-            "Failed to create the download batch for migration: {} "
+            "Failed to download for verify the migration: {} "
             "on external storage: {}. Exception: {}"
         ).format(pr.migration.pk, storage_name, str(e))
         raise Exception(error_string)
-    else:
-        # close the download batch then the connection
-        backend_object.close_download_batch(
-            conn,
-            transfer_id
-        )
-
-        pr.stage = MigrationRequest.VERIFY_GETTING
-        pr.transfer_id = transfer_id
-        pr.save()
-        logging.info((
-            "Transition: batch ID: {} VERIFY_PENDING->VERIFY_GETTING, req ID: {}"
-        ).format(pr.migration.external_id, pr.transfer_id))
-    return transfer_id
 
 
-def download_to_verify(backend_object, credentials, pr):
-    """Download the archives files in the PUT request to the VERIFY_DIR."""
-    # open a connection to the backend.  Creating the connection can account
-    # for a significant portion of the run time.  So we only do it once!
-    global connection_pool
-    conn = connection_pool.find_or_create_connection(
-        backend_object,
-        pr,
-        credentials,
-        mode="download",
-        uid="VERIFY"
-    )
-    # start at the last_archive so that interrupted uploads can be resumed
-    st_arch = pr.last_archive
-    n_arch = pr.migration.migrationarchive_set.count()
-    # for verify, we want to get the whole archive set
-    archive_set = pr.migration.migrationarchive_set.order_by('pk')
-    archive_inc = 0
-    for arch_num in range(st_arch, n_arch):
-        # determine which archive to stage (tar) and upload
-        archive = archive_set[arch_num]
-        try:
-            # get the name of the target directory
-            verify_dir = get_verify_dir(backend_object, pr)
-            # use Backend.get to pull back the files to a temporary directory
-            logging.info((
-                "Downloading for verify: {}"
-            ).format(pr.migration.external_id))
-
-            # get the list of files, without a prefix
-            file_list = archive.get_file_names(directories=False)
-            file_inc = backend_object.get(
-                conn,
-                pr,
-                file_list,
-                verify_dir
-            )
-            # inc archive if all files went up
-            archive_inc += int(file_inc == len(file_list))
-        except Exception as e:
-            raise(e)
-    # add to last archive
-    if archive_inc > 0:
-        pr.last_archive += archive_inc
-        pr.save()
-
-    # jdma_monitor will determine when the batch has finished downloading for
-    # verification and transition VERIFY_GETTING->VERIFYING
-    return archive_inc
-
-def start_download(backend_object, credentials, gr):
+def download(backend_object, credentials, gr):
     """Start the download process.  Transition from
     GET_PENDING->GETTING and create the target directory."""
-    global connection_pool
-    conn = connection_pool.find_or_create_connection(
-        backend_object,
-        gr,
-        credentials,
-        mode="download",
-        uid="GET"
-    )
 
     try:
+        global connection_pool
+        conn = connection_pool.find_or_create_connection(
+            backend_object,
+            gr,
+            credentials,
+            mode="download",
+            uid="GET"
+        )
+        # Transition
+        gr.stage = MigrationRequest.GETTING
+        gr.save()
+        logging.info((
+            "Transition: batch ID: {} GET_PENDING->GETTING"
+        ).format(gr.migration.external_id))
+
         # we just (potentially) want to get a subset of archives
         archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
         # empty file list
@@ -318,105 +269,44 @@ def start_download(backend_object, credentials, gr):
             filt_file_list = archive.get_filtered_file_names(
                 filelist=gr.filelist
             )
-            file_list.extend(filt_file_list)
-
-        transfer_id = backend_object.create_download_batch(
-            conn,
+            # if piecewise then download bit by bit, otherwise add to file_list
+            # and download at the end
+            if backend_object.piecewise():
+                backend_object.download_files(
+                    conn,
+                    gr,
+                    file_list = filt_file_list,
+                    target_dir = target_dir
+                )
+            else:
+                file_list.extend(filt_file_list)
+        # Download all if not piecewise
+        if not backend_object.piecewise():
+            backend_object.download(
+                conn,
+                gr,
+                file_list = file_list,
+                target_dir = target_dir
+            )
+        # close the connection
+        conn = connection_pool.close_connection(
+            backend_object,
             gr,
-            file_list = file_list,
+            credentials,
+            mode="download",
+            uid="GET"
         )
+
     except Exception as e:
         storage_name = StorageQuota.get_storage_name(
             gr.migration.storage.storage
         )
         error_string = (
-            "Failed to create the download batch for migration: {} "
+            "Failed to download the migration: {} "
             "on external storage: {}. Exception: {}"
         ).format(gr.migration.pk, storage_name, str(e))
         raise Exception(error_string)
-    else:
-        # close the download batch then the connection
-        backend_object.close_download_batch(
-            conn,
-            transfer_id
-        )
 
-        gr.stage = MigrationRequest.GETTING
-        gr.transfer_id = transfer_id
-        gr.save()
-        logging.info((
-            "Transition: batch ID: {} GET_PENDING->GETTING"
-        ).format(gr.migration.external_id))
-
-    return transfer_id
-
-
-def download_batch(backend_object, credentials, gr):
-    """Download the archives files in the GET request to the STAGING_DIR."""
-    # open a connection to the backend.  Creating the connection can account
-    # for a significant portion of the run time.  So we only do it once!
-    global connection_pool
-    conn = connection_pool.find_or_create_connection(
-        backend_object,
-        gr,
-        credentials,
-        mode="download",
-        uid="GET"
-    )
-    try:
-        # we just (potentially) want to get a subset of archives
-        archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
-        # empty file list
-        archive_inc = 0
-        for arch_num in range(st_arch, n_arch):
-            # determine which archive to download and stage (tar)
-            archive = archive_set[arch_num]
-            # Log the download
-            logging.info((
-                "Downloading for unarchiving: {}"
-            ).format(gr.migration.external_id))
-
-            # Get target dir - staging or just the target directory
-            if archive.packed:
-                target_dir = get_download_dir(backend_object, gr)
-            else:
-                # if not packed then it is the target directory from the request
-                target_dir = gr.target_path
-
-            # create the target directory if it doesn't exist
-            try:
-                os.makedirs(target_dir)
-            except:
-                pass
-
-            # get the list of files, without a prefix
-            file_list = archive.get_filtered_file_names(filelist=gr.filelist)
-            # download each file to the staging directory
-            file_inc = backend_object.get(
-                conn,
-                gr,
-                file_list,
-                target_dir,
-            )
-            # inc archive if all files were downloaded
-            archive_inc += int(file_inc == len(file_list))
-    except Exception as e:
-        raise(e)
-
-    # add to last archive
-    if archive_inc > 0:
-        gr.last_archive += archive_inc
-        gr.save()
-
-    # close the batch on the external storage
-    backend_object.close_download_batch(
-        conn,
-        gr.transfer_id
-    )
-
-    # the archive has been downloaded to the staging directory
-    # jdma_pack will unarchive it to the target directory
-    return archive_inc
 
 def put_transfers(backend_object, key):
     """Work through the state machine to upload batches to the external
@@ -456,41 +346,29 @@ def put_transfers(backend_object, key):
             # create the batch on this instance, next time the script is run
             # the archives will be created as tarfiles
             try:
-                start_upload(backend_object, credentials, pr)
+                upload(backend_object, credentials, pr)
                 put_count += 1
             except Exception as e:
                 # Something went wrong, set FAILED and failure_reason
                 mark_migration_failed(pr, str(e), e)
         # between these stages PUT_PACKING occurs in jdma_pack
         elif pr.stage == MigrationRequest.PUTTING:
-            # in the process of putting
-            try:
-                # connection is created - find_or_create_connection will find it
-                # in the upload_batch function
-                put_count += upload_batch(backend_object, credentials, pr)
-            except Exception as e:
-                # Something went wrong, set FAILED and failure_reason
-                mark_migration_failed(pr, str(e), e)
-
+            # in the process of putting - we don't do anything here now!
+            # jdma_monitor script will transition from PUTTING->VERIFY_PENDING
+            pass
         # check if data is now on external storage and should be pulled
         # back for verification
         elif pr.stage == MigrationRequest.VERIFY_PENDING:
+            # pull back the data from the external storage
             try:
                 put_count += 1
-                start_verify(backend_object, credentials, pr)
+                verify(backend_object, credentials, pr)
             except Exception as e:
                 # Something went wrong, set FAILED and failure_reason
                 mark_migration_failed(pr, str(e), e)
 
-        # pull back the data from the external storage
         elif pr.stage == MigrationRequest.VERIFY_GETTING:
-            try:
-                # connection is created - find_or_create_connection will find it
-                # in the download_to_verify function
-                put_count += download_to_verify(backend_object, credentials, pr)
-            except Exception as e:
-                # Something went wrong, set FAILED and failure_reason
-                mark_migration_failed(pr, str(e), e)
+            pass
         elif pr.stage == MigrationRequest.VERIFYING:
             pass
         # unlock
@@ -644,23 +522,14 @@ def get_transfers(backend_object, key):
             # for elastic tape.  Also create the directory and transition the
             # state
             try:
-                start_download(backend_object, credentials, gr)
+                download(backend_object, credentials, gr)
                 get_count += 1
             except Exception as e:
                 # Something went wrong, set FAILED and failure_reason
                 mark_migration_failed(gr, str(e), e, upload_mig=False)
 
         elif gr.stage == MigrationRequest.GETTING:
-            # pull back the data from the backend
-            try:
-                c_arch = gr.last_archive
-                download_batch(backend_object, credentials, gr)
-                # check whether something has been downloaded or not
-                if c_arch != gr.last_archive:
-                    get_count += 1
-            except Exception as e:
-                # Something went wrong, set FAILED and failure_reason
-                mark_migration_failed(gr, str(e), e, upload_mig=False)
+            pass
 
         elif gr.stage == MigrationRequest.GET_RESTORE:
             # restore the file permissions
@@ -836,7 +705,6 @@ def process(backend, key):
     If they weren't then put the daemon to sleep for a minute to prevent the
     database being hammerred"""
     backend_object = backend()
-    backend_object.process_transfer()
 
     n_put = put_transfers(backend_object, key)
     n_get = get_transfers(backend_object, key)

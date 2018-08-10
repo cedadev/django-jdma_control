@@ -52,8 +52,9 @@ class MigrationInline(admin.TabularInline):
     extra = 0
     show_change_link = True
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request, obj):
         return False
+
 
 class MigrationRequestAdmin(admin.ModelAdmin):
     save_on_top = True
@@ -104,7 +105,7 @@ class MigrationFileInline(admin.TabularInline):
     extra = 0
     show_change_link = True
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request, obj):
         return False
 
 
