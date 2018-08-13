@@ -8,6 +8,7 @@ from collections import namedtuple
 
 from jasmin_ldap.query import *
 import jdma_site.settings as settings
+import socket
 
 FileInfo = namedtuple('FileInfo',
                       ['filepath', 'size', 'digest', 'unix_user_id',
@@ -202,3 +203,12 @@ def get_download_dir(backend_object, gr):
         )
     )
     return download_dir
+
+
+def get_ip_address():
+    """Get an ip address using socket, or fake for testing purposes."""
+    ip = socket.gethostbyname(socket.gethostname())
+    # fake if running on VM
+    if ip == '127.0.0.1':
+        ip = '130.246.189.180'
+    return ip

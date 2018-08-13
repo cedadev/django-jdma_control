@@ -93,7 +93,7 @@ class Backend(object):
 
     def upload_files(self, conn, put_req, prefix, file_list):
         """Create a batch for upload to the external storage, upload the files
-        and return the batch id"""
+        and set the batch id"""
         raise NotImplementedError
 
     def delete_batch(self, conn, batch_id):
