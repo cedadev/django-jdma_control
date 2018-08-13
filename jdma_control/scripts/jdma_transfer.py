@@ -196,6 +196,10 @@ def verify(backend_object, credentials, pr):
             archive_files = archive.get_filtered_file_names(prefix="")
             file_list.extend(archive_files)
 
+        logging.info((
+            "Downloading files to verify: {} from {}"
+        ).format(file_list, backend_object.get_name()))
+
         backend_object.download_files(
             conn,
             pr,
@@ -272,6 +276,14 @@ def download(backend_object, credentials, gr):
             # if piecewise then download bit by bit, otherwise add to file_list
             # and download at the end
             if backend_object.piecewise():
+                logging.info((
+                    "Downloading files: {} from {} to {}"
+                ).format(
+                    filt_file_list,
+                    backend_object.get_name(),
+                    target_dir
+                ))
+
                 backend_object.download_files(
                     conn,
                     gr,
@@ -282,7 +294,7 @@ def download(backend_object, credentials, gr):
                 file_list.extend(filt_file_list)
         # Download all if not piecewise
         if not backend_object.piecewise():
-            backend_object.download(
+            backend_object.download_files(
                 conn,
                 gr,
                 file_list = file_list,
@@ -543,25 +555,7 @@ def get_transfers(backend_object, key):
     return get_count
 
 
-def start_delete(backend_object, credentials, dr):
-    """Create a delete batch on the external storage.
-    Set the last archive to 0.
-    Transition to DELETING."""
-    global connection_pool
-    conn = connection_pool.find_or_create_connection(
-        backend_object,
-        dr,
-        credentials,
-        mode="delete",
-        uid="DELETE"
-    )
-    dr.migration.last_archive = 0
-    dr.migration.save()
-    dr.stage = MigrationRequest.DELETING
-    dr.save()
-
-
-def delete_batch(backend_object, credentials, dr):
+def delete(backend_object, credentials, dr):
     """Delete the batch, taking turns to delete a single archive at once."""
     # open a connection to the backend.  Creating the connection can account
     # for a significant portion of the run time.  So we only do it once!
@@ -573,54 +567,26 @@ def delete_batch(backend_object, credentials, dr):
         mode="delete",
         uid="DELETE"
     )
-    # get the storage id for the backend object
-    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
-    # find the associated PUT or MIGRATE migration request:
-    # the number of archives uploaded comes from the last_archive of this
-    # migration request (if not zero)
     try:
-        put_req = MigrationRequest.objects.get(
-            (Q(request_type=MigrationRequest.PUT) |
-            Q(request_type=MigrationRequest.MIGRATE))
-            & Q(migration=dr.migration)
-            & Q(migration__storage__storage=storage_id)
+        # Transition
+        logging.info((
+            "Transition: batch ID: {} DELETE_PENDING->DELETING"
+        ).format(dr.migration.external_id))
+
+        dr.migration.stage = Migration.DELETING
+        dr.stage = MigrationRequest.DELETING
+        dr.migration.save()
+        logging.info((
+            "Deleting batch: {} from {}"
+        ).format(dr.migration.external_id, backend_object.get_name()))
+
+        backend_object.delete_batch(
+            conn,
+            dr,
+            dr.migration.external_id,
         )
-    except:
-        put_req = None
-    # start at the last_archive so that interrupted deletes can be resumed
-    st_arch = dr.last_archive
-    # determine how many archives have actually been uploaded
-    if put_req and put_req.last_archive != 0:
-        n_arch = put_req.last_archive
-    else:
-        n_arch = dr.migration.migrationarchive_set.count()
-    # loop over the number of archives
-    archive_set = dr.migration.migrationarchive_set.order_by('pk')
-    for arch_num in range(st_arch, n_arch):
-        # determine which archive to delete
-        archive = archive_set[arch_num]
-        try:
-            logging.info((
-                "Deleting: {}/{}"
-            ).format(dr.migration.external_id, archive.get_id()))
-            backend_object.delete(
-                conn,
-                dr.migration.external_id,
-                archive.get_id(),
-            )
-            # update the last good archive
-            dr.last_archive += 1
-            dr.save()
-
-        except Exception as e:
-            raise(e)
-
-    # close the batch on the external storage - for ET this will trigger the
-    # transport
-    backend_object.close_delete_batch(
-        conn,
-        dr.migration.external_id
-    )
+    except Exception as e:
+        raise(e)
 
 
 def delete_transfers(backend_object, key):
@@ -634,12 +600,6 @@ def delete_transfers(backend_object, key):
         Q(request_type=MigrationRequest.DELETE)
         & Q(migration__storage__storage=storage_id)
     )
-    # create the required ldap server pool, do this just once to
-    # improve performance
-    ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY,
-                              settings.JDMA_LDAP_REPLICAS)
-    ldap_conn = Connection.create(ldap_servers)
-
     # for each GET request get the Migration and determine if the type of the
     # Migration is GET_PENDING
     del_count = 0
@@ -676,7 +636,7 @@ def delete_transfers(backend_object, key):
                 if ((put_req and put_req.stage > MigrationRequest.PUT_PACKING)
                    or (dr.migration.stage == Migration.ON_STORAGE)
                 ):
-                    start_delete(backend_object, credentials, dr)
+                    delete(backend_object, credentials, dr)
                 else:
                 # transition to DELETE_TIDY if there are no files to delete
                     dr.stage = MigrationRequest.DELETE_TIDY
@@ -688,14 +648,9 @@ def delete_transfers(backend_object, key):
 
         elif dr.stage == MigrationRequest.DELETING:
         # in the process of deleting
-            try:
-                delete_batch(backend_object, credentials, dr)
-                del_count += 1
-            except Exception as e:
-                mark_migration_failed(dr, str(e), e)
+            pass
         # unlock
         dr.unlock()
-    ldap_conn.close()
     return del_count
 
 

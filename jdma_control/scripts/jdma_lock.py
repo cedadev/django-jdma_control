@@ -335,8 +335,6 @@ def lock_delete_migrations(backend_object):
         dr.stage = MigrationRequest.DELETE_PENDING
         dr.locked = False
         dr.save()
-        dr.migration.stage = Migration.DELETING
-        dr.migration.save()
         logging.info("DELETE: Locked migration: {}".format(dr.migration.pk))
         logging.info((
             "Transition: request ID: {} GET_START->GET_PENDING"

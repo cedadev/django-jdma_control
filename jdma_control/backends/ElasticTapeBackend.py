@@ -1,37 +1,30 @@
-"""Class for a JASMIN Data Migration App backend which targets Elastic Tape."""
+"""Class for a JASMIN Data Migration App backend which targets Elastic Tape.
+Note that this is the simplified version, which (simply) uses functions from
+the Elastic Tape client to GET and PUT the data.
+Transport is handled by the script ET_transfer_mp, which is a version of the
+et_transfer_mp script which runs on et1.ceda.ac.uk."""
 
 import os
-from zlib import adler32
-import tempfile
-import tarfile
 
 from django.db.models import Q
 
 import requests
 from bs4 import BeautifulSoup
+from time import sleep
 
 from jdma_control.backends.Backend import Backend
 from jdma_control.backends import ElasticTapeSettings as ET_Settings
 from jdma_control.backends.ConnectionPool import ConnectionPool
+from jdma_control.scripts.common import get_ip_address
+
 # Import elastic_tape client library
 import elastic_tape.client as ET_client
-import elastic_tape.shared as ET_shared
-import elastic_tape.shared.storaged_pb2 as ET_proto
 
 import jdma_site.settings as settings
-import socket
 
 # create the connection pool - these are needed for the get transfers, as each
 # transfer thread requires a connection that is kept up
 et_connection_pool = ConnectionPool()
-
-def get_ip_address():
-    """Get an ip address using socket, or fake for testing purposes."""
-    ip = socket.gethostbyname(socket.gethostname())
-    # fake if running on VM
-    if ip == '127.0.0.1':
-        ip = '130.246.189.180'
-    return ip
 
 
 def get_completed_puts(backend_object):
@@ -130,9 +123,15 @@ def get_completed_gets(backend_object):
         if len(table) == 0:
             continue
         # get the first row
+        rows = table.find_all("tr")
+        if len(rows) < 2:
+            continue
         row_1 = table.find_all("tr")[1]
+
         # the transfer id is the first column, the status is the third
         cols = row_1.find_all("td")
+        if len(cols) < 3:
+            continue
         transfer_id = cols[0].get_text()
         status = cols[2].get_text()
         # this is a paranoid check - this really shouldn't happen!
@@ -276,62 +275,6 @@ class ElasticTapeBackend(Backend):
         except Exception:
             return False
 
-    def process_transfer(self):
-        """Process a transfer.  For ET this gets the next transferable and then
-        sends it.
-        Could run multiple of these in threads."""
-        # get the ip address
-        ip = get_ip_address()
-        try:
-            # See et_transfer_mp for info and original code
-            conn = et_connection_pool.find_or_create_connection(
-                self,
-                mig_req = None,
-                credentials = None,
-                mode="upload",
-                uid="TRANSFER"
-            )
-        except Exception as e:
-            raise Exception(e)
-        else:
-            try:
-                transfer = conn.getNextTransferrable(PI = ip)
-                print(transfer)
-            except ET_shared.error.StorageDError as e:
-                if e.code == ET_shared.error.ECCHEFUL:
-                    # cache is full, do nothing, jdma_monitor will try again later
-                    print ("Cache full")
-                    return
-                else:
-                    # some other error - raise an Exception and the migration will
-                    # be set to FAILED
-                    et_connection_pool.close_connection(
-                        self,
-                        mig_req = None,
-                        mode = "upload",
-                        uid="TRANSFER"
-                    )
-                    raise Exception(e)
-            except Exception as e:
-                raise Exception(e)
-
-            if transfer is None:
-                # leave the connection open
-                return
-            else:
-                eList = transfer.verify()
-                if eList:
-                    for e in eList:
-                        conn.msgIface.sendError(e)
-                else:
-                    transfer.send()
-            et_connection_pool.close_connection(
-                self,
-                mig_req = None,
-                mode = "upload",
-                uid="TRANSFER"
-            )
-
     def monitor(self, thread_number=None):
         """Determine which batches have completed."""
         try:
@@ -347,7 +290,7 @@ class ElasticTapeBackend(Backend):
         """Should the data be packed into a tarfile for this backend?"""
         return False
 
-    def piecewise_upload(self):
+    def piecewise(self):
         """For elastic tape the data shouldn't be uploaded archive by archive
         but uploaded all at once."""
         return False
@@ -373,10 +316,10 @@ class ElasticTapeBackend(Backend):
         conn.close()
         return
 
-    def create_download_batch(self, conn, get_req, file_list=[]):
+    def download_files(self, conn, get_req, file_list, target_dir):
         """Create a download batch for the elastic tape.
-        This will also instigate the transfer, and run the transfers, as ET
-        requires the conn to stay up during the transfer.
+        This will also instigate the transfer, as ET requires the conn to stay
+        up during the transfer.
         """
         # the ET client interface is contained in ET_conn
         try:
@@ -395,8 +338,8 @@ class ElasticTapeBackend(Backend):
             batch.requestor = conn.jdma_user
             # override the ip address
             batch.PI = ip
-            # override the override
-            batch.override = 0
+            # overwrite any files
+            batch.override = 1
 
             # get the common_path
             cp = get_req.migration.common_path
@@ -405,168 +348,56 @@ class ElasticTapeBackend(Backend):
                 fname = os.path.join(cp,f)
                 batch.addFile(fname)
 
-            # register a batch retrieval
-            batch_retrieve = batch.retrieve()
-            transfer_id = conn.msgIface.retrieveBatch(batch_retrieve)
-            # start the retrieval
-            conn.msgIface.sendStartRetrieve(int(transfer_id))
+            """The code below here is replicated from elastic_tape.client.client
+            We need to replicate it as we need to get the transfer id for
+            monitoring purposes."""
 
-        except Exception as e:
-            transfer_id = None
-            raise Exception(str(e))
-        return str(transfer_id)
+            # get the files from the ET client
+            retrieve_batch = batch.retrieve()
 
-    def close_download_batch(self, conn, transfer_id):
-        """Close the download batch for the elastic tape."""
-        return
+            # get the request id and store it in the migration request
+            reqID = conn.msgIface.retrieveBatch( retrieve_batch )
+            get_req.transfer_id = reqID
+            get_req.save()
 
-    def get(self, conn, get_req, object_name, target_dir, thread_number=None):
-        """Download a number files from the elastic tape to a target directory.
-        We can run this function in a thread to parallelise the transfers.
-        """
-        # avoid a circular dependancy
-        from jdma_control.models import MigrationRequest, StorageQuota
+            conn.msgIface.sendStartRetrieve( reqID )
 
-        # get the storage id for the backend object
-        storage_id = StorageQuota.get_storage_index(self.get_id())
+            downloadThreads = []
+            handler = ET_client.client.DownloadThread
+            if os.getenv('ET_MP'):
+                handler = DownloadProcess
+                global logger
+                logger = multiprocessing.get_logger()
 
-        # global et_connection_pool
-        new_conn = et_connection_pool.find_or_create_connection(
-            self,
-            get_req,
-            None,       # are credentials needed?
-            mode = "download",
-            thread_number = thread_number,
-            uid="ET_GET"
-        )
+            for i in range( ET_Settings.THREADS ):
+                t = handler()
+                t.daemon = True
+                downloadThreads.append( t )
+                t.setup(reqID, get_req.target_path, conn.host, conn.port)
+                t.start()
 
-        # convert request id in get request to an integer, required by ET library
-        req_ID = int(get_req.transfer_id)
+            while not conn.msgIface.checkRRComplete( reqID ):
+                sleep( 5 )
 
-        # see if request has finished
-        try:
-            if conn.msgIface.checkRRComplete(req_ID):
-                badFiles = conn.msgIface.FinishRR(req_ID)
-                if len(badFiles) != 0:
-                    raise Exception(
-                        "Badfiles in elastic_tape::get, transfer_id: {}".format(
-                            req_ID
-                        )
-                    )
-        except:
-            pass
+            bad_files = conn.msgIface.FinishRR( reqID )
+            for t in downloadThreads:
+                t.stop()
+                t.join()
 
-        # get the next processable / transferrable tar file
-        new_conn.msgIface.sendNextProcessable(req_ID)
-        # read the files to transfer
-        trans_data = new_conn.msgIface.readFiles()
-        # if trans_data is None or data is finished then exit. As the transfer
-        # runs as a daemon, an attempt to download will be made next time the
-        # loop occurs
-        if trans_data is None:
-            # leave the connection open
-            return 0
-
-        if trans_data.finished:
-            # finished - just return
-            return 0
-
-        if trans_data.errored:
-            et_connection_pool.close_connection(
-                self,
-                get_req,
-                mode = "download",
-                thread_number = thread_number,
-                uid="ET_GET"
-            )
-            raise Exception("Error in ElasticTapeBackend::get")
-
-        # check that type is "CLIENT_TAR" - it should be as all transfers are
-        # tar files
-        if not trans_data.type == "CLIENT_TAR":
-            raise Exception(
-                "ElasticTapeBackend::get trying to download a non tar file."
-            )
-        # it is a tar file so download it as such and unpack it
-        # this code comes from the __getTar function in elastic_tape.client
-
-        checksum = 1
-        # Download tar to a temporary file to the target directory
-        fd, tempname = tempfile.mkstemp(dir=target_dir)
-        handle = os.fdopen(fd, 'wb')
-
-        while True: # loop while transferring the data, exit via the break below
-            try:
-                msg = new_conn.msgIface.readMessage()
-                if msg.Type == ET_proto.DATA:
-                    checksum = adler32(msg.Payload, checksum)
-                    handle.write(msg.Payload)
-                elif msg.Type == ET_proto.CHECKSUM:
-                    resp = ET_proto.File()
-                    try:
-                        resp.ParseFromString(msg.Payload)
-                    except google.protobuf.message.DecodeError as e:
-                        raise ET_shared.error.StorageDError (
-                            ET_shared.error.EBADRESP,
-                            notes="Expected Checksum"
-                        )
-
-                    if ET_shared.checksum.genChecksum(checksum) != resp.Checksum:
-                        raise ET_shared.error.StorageDError (
-                            ET_shared.error.ERETRIEVE,
-                            notes="Bad checksum for tar transfer"
-                        )
-                    else: # Indicates the end of a successful download of tar data
-                        break
-                else:
-                    raise ET_shared.error.StorageDError (
-                        ET_shared.error.EBADRESP,
-                        notes="Unexpected message type {}".format(msg.Type)
-                    )
-            except ET_shared.error.StorageDError as e:
-                raise ET_shared.error.StorageDError(
-                    'Received error %s on downloading tar data'
+            # raise the list of badfiles as an exception - mark migraiton as
+            # FAILED
+            if len(bad_files) > 0:
+                raise Exception(
+                    "Could not download files: {}".format(bad_files)
                 )
 
-        # Once data has been downloaded and checksum verified, unpack the tar file
-        handle.flush()
-        os.fsync(handle.fileno())
-        handle.close()
-
-        # extract the tar file - two modes, one for VERIFY (all archive files)
-        # and one for GET (just the files in the filelist, OR all the files in the
-        # archives
-        try:
-            tarData = tarfile.open(tempname)
-            filelist = []
-            # get the list of files depending on the request type
-            if (get_req.request_type == MigrationRequest.PUT
-                or not get_req.filelist
-                or len(get_req.filelist) == 0):
-                # loop over each archive in the migration
-                archive_set = get_req.migration.migrationarchive_set.order_by('pk')
-                for archive in archive_set:
-                    # get the list of files for this archive
-                    filelist.extend(archive.get_filtered_file_names(
-                                    prefix=get_req.migration.common_path
-                    ))
-            else:
-                filelist = get_req.filelist
-            # do the extraction
-            for f in filelist:
-                tarData.extract(f.lstrip('/'), target_dir)
-            # delete the tarfile
-            os.unlink(tempname)
         except Exception as e:
-            raise Exception(
-                  "Error extracting ET tar file: {} {}".format(tempname, str(e))
-            )
+            raise Exception(str(e))
+        return str(external_id)
 
-        return 1
-
-    def create_upload_batch(self, conn, put_req, file_list=[]):
+    def upload_files(self, conn, put_req, prefix, file_list):
         """Create a batch on the elastic tape and upload the filenames.
-        The batch id will be created.
+        The batch id will be created and saved to the Migration.
         """
         try:
             # don't do anything if filelist length is 0
@@ -594,58 +425,17 @@ class ElasticTapeBackend(Backend):
             # from function
             batch_id = batch.register()
 
+            # register the batch_id as the external id
+            put_req.migration.external_id = batch_id
+            put_req.migration.save()
+
         except Exception as e:
             batch_id = None
             raise Exception(str(e))
         return str(batch_id)
 
-    def close_upload_batch(self, conn, batch_id):
-        """Close the batch on the elastic tape. The ET already has an
-        asyncronous structure so replicating it here is not necessary."""
-        return
 
-    def put(self, conn, put_req, archive_path, packed=False):
-        """Put a staged archive (with path archive) onto the elastic tape.
-        Here we add to the conn.files list of files, which the names of are
-        all uploaded on close_upload_batch
-        """
-        # all of this code is now duplicated in process_transfer
-        # try:
-        #     # get the next transferrable for this batch and ip address
-        #     ip = get_ip_address()
-        #     transfer = conn.getNextTransferrable(
-        #                    PI=ip,
-        #                    batchID=int(put_req.migration.external_id)
-        #                )
-        #     # Handle the transfer
-        #     if transfer is None:
-        #         return 0
-        #     else:
-        #         transfer.send()
-        # except ET_shared.error.StorageDError as e:
-        #     if e.code == ET_shared.error.ECCHEFUL:
-        #         # cache is full, do nothing, jdma_transfer will try again later
-        #         return 0
-        #     else:
-        #         # some other error - raise an Exception and the migration will
-        #         # be set to FAILED
-        #         raise Exception(e)
-        # except Exception as e:
-        #     raise Exception(e)
-        # # return one for the last_archive count - ET does not need this to keep
-        # # a count of which archives have uploaded, but we need to know how
-        # # many files have uploaded so as to sleep or not
-        return 1
-
-    def create_delete_batch(self, conn, batch_id):
-        """Create a batch to delete files from the elastic tape"""
-        return None
-
-    def close_delete_batch(self, conn, batch_id):
-        """Close the delete batch on the elastic tape"""
-        return None
-
-    def delete(self, conn, batch_id, archive):
+    def delete_batch(self, conn, del_req, batch_id):
         """Delete a single tarred archive of files from the object store"""
         conn.deleteBatchByID(conn.jdma_workspace,
                              conn.jdma_user,

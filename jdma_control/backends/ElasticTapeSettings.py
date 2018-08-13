@@ -15,3 +15,5 @@ PUT_HOST = "jasmin_et-ingest.fds.rl.ac.uk"
 GET_HOST = "jasmin_et-retrieval.fds.rl.ac.uk"
 PORT = 7456
 OBJECT_SIZE = 2 * 1000**3
+THREADS=2
+MAX_TRANSFERS=5

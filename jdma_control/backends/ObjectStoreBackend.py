@@ -312,10 +312,35 @@ class ObjectStoreBackend(Backend):
                              object_name)
         return len(file_list)
 
-    def delete_batch(self, conn, batch_id):
+    def delete_batch(self, conn, del_req, batch_id):
         """Delete a whole batch from the object store"""
-        object_name = archive
-        conn.delete_object(Bucket=batch_id, Key=object_name)
+        # we have to delete the bucket and all its contents
+        # s3 client only allows for 1000 keys to be returned using the
+        # list_object_v2 method.  We use continuation token to continue to
+        # delete all objects in a loop
+        kwargs = {'Bucket': batch_id}
+        continuation = True
+        while continuation:
+            # list objects
+            response = conn.list_objects_v2(**kwargs)
+            # get each object name in turn and delete it
+            try:
+                for obj in response['Contents']:
+                    object_name = obj['Key']
+                    conn.delete_object(Bucket=batch_id, Key=object_name)
+            except KeyError:
+                pass
+
+            try:
+                kwargs['ContinuationToken'] = response['NextContinuationToken']
+            except KeyError:
+                continuation = False
+
+        # delete the bucket
+        try:
+            conn.delete_bucket(Bucket=batch_id)
+        except:
+            pass
 
     def user_has_put_permission(self, conn):
         """Check whether the user has permission (via their access_key and
