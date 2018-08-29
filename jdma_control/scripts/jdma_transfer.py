@@ -71,10 +71,10 @@ def upload(backend_object, credentials, pr):
             archive_set = pr.migration.migrationarchive_set.order_by('pk')
 
             if backend_object.piecewise():
-                st_arch = pr.last_archive
-                n_arch = pr.migration.migrationarchive_set.count()
+                start_arch = pr.last_archive
+                end_arch = pr.migration.migrationarchive_set.count()
                 # loop over the archives
-                for arch_num in range(st_arch, n_arch):
+                for arch_num in range(start_arch, end_arch):
                     # get the archive from the archive number
                     archive = archive_set[arch_num]
                     # check whether the archive is packed
@@ -684,8 +684,7 @@ def run(*args):
 
     # run this indefinitely until the signals are triggered
     while True:
-        #try:
-        if True:
+        try:
             # read the decrypt key
             key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
             n_procs = 0
@@ -708,8 +707,7 @@ def run(*args):
             # sleep for ten secs if nothing happened in the loop
             if n_procs == 0:
                 sleep(10)
-        else:
-        #except Exception as e:
+        except Exception as e:
             # catch all exceptions as we want this to run in a loop for all
             # backends and transfers - we don't want one transfer to crash out
             # the transfer daemon with a single bad transfer!
