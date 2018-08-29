@@ -29,56 +29,64 @@ def get_et_gws_from_url(url):
         print("Could not read from URL: " + url)
         return None
 
+def create_user_entry(line):
+    # create a user (if it doesn't exist) and fill the data
+    new_user = User.objects.filter(name=line[1])
+    user_found = len(new_user) != 0
+    if not user_found:
+        new_user = User()
+        new_user.name = line[1]
+        new_user.email = line[3]
+        new_user.save()
+    else:
+        new_user = new_user[0]
+
+    # create a gws and fill the data (if not exist)
+    new_gws = Groupworkspace.objects.filter(workspace=line[0])
+    gws_found = len(new_gws)
+    if not gws_found:
+        new_gws = Groupworkspace()
+        new_gws.save()
+        new_gws.workspace = line[0]
+        new_gws.managers.add(new_user)
+        new_gws.save()
+    else:
+        new_gws = new_gws[0]
+
+    return new_gws
+
+def create_quota_entry(storageid, new_gws, quota_size, quota_used):
+    new_sq = StorageQuota.objects.filter(
+        workspace=new_gws
+    ).filter(storage=storageid)
+    sq_found = len(new_sq) != 0
+    if not sq_found:
+        new_sq = StorageQuota()
+        new_sq.storage = storageid
+        new_sq.quota_size = quota_size
+        new_sq.quota_used = quota_used
+        new_sq.workspace = new_gws
+        new_sq.save()
+    else:
+        new_sq = new_sq[0]
+        # update quota if necessary
+        new_sq.quota_size = quota_size
+        new_sq.quota_used = quota_used
+        new_sq.save()
+
 
 def create_user_gws_quotas(data):
     # Create the User, GroupWorkspace and StorageQuota from each line of the
     # data
+    storageid = StorageQuota.get_storage_index("elastictape")
     for line in data:
         if len(line) == 4:
-            # create a user (if it doesn't exist) and fill the data
-            new_user = User.objects.filter(name=line[1])
-            user_found = len(new_user) != 0
-            if not user_found:
-                new_user = User()
-                new_user.name = line[1]
-                new_user.email = line[3]
-                new_user.save()
-            else:
-                new_user = new_user[0]
-
-            # create a gws and fill the data (if not exist)
-            new_gws = Groupworkspace.objects.filter(workspace=line[0])
-            gws_found = len(new_gws)
-            if not gws_found:
-                new_gws = Groupworkspace()
-                new_gws.save()
-                new_gws.workspace = line[0]
-                new_gws.managers.add(new_user)
-                new_gws.save()
-            else:
-                new_gws = new_gws[0]
-
+            # create the user entry using the above script
+            new_gws = create_user_entry(line)
             # get the quota and quota used
             quota, quota_used = get_et_quota_used(ET_QUOTA_URL, line[0])
             # create the new storage quota and assign the workspace
-            storageid = StorageQuota.get_storage_index("elastictape")
-            new_sq = StorageQuota.objects.filter(
-                workspace=new_gws
-            ).filter(storage=storageid)
-            sq_found = len(new_sq) != 0
-            if not sq_found:
-                new_sq = StorageQuota()
-                new_sq.storage = storageid
-                new_sq.quota_size = int(line[2])
-                new_sq.quota_used = quota_used
-                new_sq.workspace = new_gws
-                new_sq.save()
-            else:
-                new_sq = new_sq[0]
-                # update quota if necessary
-                new_sq.quota_size = int(line[2])
-                new_sq.quota_used = quota_used
-                new_sq.save()
+            create_quota_entry(storageid, new_gws, int(line[2]), quota_used)
 
 
 def get_et_quota_used(url, workspace):
