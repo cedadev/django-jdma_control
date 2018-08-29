@@ -14,7 +14,7 @@ ET_EXPORT_URL = "http://cedadb.ceda.ac.uk/gws/etexport/"
 def create_user_gws_quotas(data):
     # Create the User, GroupWorkspace and StorageQuota from each line of the
     # data
-    storageid = StorageQuota.get_storage_index("objectstore")
+    storageid = StorageQuota.get_storage_index("ftp")
     for line in data:
         if len(line) == 4:
             # create user entry

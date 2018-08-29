@@ -96,7 +96,7 @@ class Backend(object):
         and set the batch id"""
         raise NotImplementedError
 
-    def delete_batch(self, conn, batch_id):
+    def delete_batch(self, conn, del_req, batch_id):
         """Delete a batch from the external storage"""
         raise NotImplementedError
 

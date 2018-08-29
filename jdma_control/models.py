@@ -138,9 +138,6 @@ class Migration(models.Model):
     :var models.IntegerField stage: The stage that the directory is at.
     """
 
-    # default backend
-    default_backend = "elastictape"
-
     # user that the directory belongs to
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=False,
                              help_text="User that the migration belongs to")

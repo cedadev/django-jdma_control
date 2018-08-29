@@ -458,7 +458,7 @@ class MigrationRequestView(View):
         if not JDMA_BACKEND_OBJECT.check_credentials_supplied(credentials):
             required_credentials = JDMA_BACKEND_OBJECT.required_credentials()
             error_data["error"] = (
-                "Required credentials for: {} not supplied  Required"
+                "Required credentials for: {} not supplied  Required "
                 "credentials for: {} are: {}.  Supplied credentials: {}."
             ).format(storage_name, storage_name,
                      ", ".join(required_credentials),
@@ -580,7 +580,6 @@ class MigrationRequestView(View):
                 except Exception:
                     error_data["error"] = "Batch not found"
                     return HttpError(error_data)
-
                 #  3. check the backend
                 storage_name = StorageQuota.get_storage_name(migration.storage.storage)
                 JDMA_BACKEND_OBJECT = \
@@ -927,8 +926,8 @@ class MigrationRequestView(View):
 
                 # check that the user has delete permission
                 if not JDMA_BACKEND_OBJECT.user_has_delete_permission(
-                    data["migration_id"],
-                conn):
+                    data["migration_id"], conn
+                ):
                     error_data["error"] = (
                         "User {} does not have permission to delete batch: {}"
                     ).format(user.name, data["migration_id"])

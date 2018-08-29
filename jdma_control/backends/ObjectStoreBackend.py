@@ -94,8 +94,6 @@ def get_completed_gets(backend_object):
     #
     for gr in get_reqs:
         # loop over each archive in the migration
-        # if the filelist for the GET request is not None then we have to determine
-        # which archives to download
         archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
         # just need to see if the archive has been downloaded to the file system
         # we know this when the file is present and the file size is equal to
@@ -223,7 +221,7 @@ class ObjectStoreBackend(Backend):
         return True
 
     def create_connection(self, user, workspace, credentials, mode="upload"):
-        # create connection to Object Store, using the supplied credentials
+        """Create connection to Object Store, using the supplied credentials"""
         s3c = boto3.client("s3", endpoint_url=OS_Settings.S3_ENDPOINT,
                            aws_access_key_id=credentials['access_key'],
                            aws_secret_access_key=credentials['secret_key'])
@@ -304,7 +302,7 @@ class ObjectStoreBackend(Backend):
             put_req.migration.external_id = bucket_name
             put_req.migration.save()
 
-        # we have multiple files so create the archive path
+        # we have multiple files so upload them one at once
         for archive_path in file_list:
             object_name = os.path.relpath(archive_path, prefix)
             conn.upload_file(archive_path,
