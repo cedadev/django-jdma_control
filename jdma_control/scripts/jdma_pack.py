@@ -6,7 +6,10 @@
 
 import os
 import logging
+import signal, sys
 from tarfile import TarFile
+from time import sleep
+from multiprocessing import Process, Queue
 
 from django.db.models import Q
 
@@ -17,27 +20,15 @@ from jdma_control.scripts.jdma_lock import setup_logging, calculate_digest
 from jdma_control.scripts.jdma_transfer import mark_migration_failed
 from jdma_control.scripts.jdma_transfer import get_download_dir
 from jdma_control.scripts.common import get_archive_set_from_get_request
+from jdma_control.scripts.common import split_args
 import jdma_control.backends
+from jdma_control.scripts.config import read_process_config
 
 
-def pack_archive(archive_staging_dir, archive, pr):
+def pack_archive(request_staging_dir, archive, pr):
     """Create a tar file containing the files that are in the
        MigrationArchive object"""
-    # internal id and common_path
-    internal_id = pr.migration.get_id()
-    common_path = pr.migration.common_path
 
-    # create the directory path for the batch (internal_id)
-    archive_path = os.path.join(
-        archive_staging_dir,
-        internal_id
-    )
-    if not (os.path.isdir(archive_path)):
-        os.makedirs(archive_path)
-
-    # create the tar file path
-    tar_file_path = os.path.join(archive_path,
-                                 archive.get_filtered_file_names()[0])
     # if the file exists then delete it!
     try:
         os.unlink(tar_file_path)
@@ -52,51 +43,137 @@ def pack_archive(archive_staging_dir, archive, pr):
     # get the MigrationFiles belonging to this archive
     migration_files = archive.migrationfile_set.all()
     # loop over the MigrationFiles in the MigrationArchive
-    for mf in migration_files:
+    for mp in migration_paths:
         # don't add if it's a directory - files under the directory will
         # be added
-        # get the path, it's the common_path + the migration file path
-        path = os.path.join(common_path, mf.path)
-        if not(os.path.isdir(path)):
-            tar_file.add(path, arcname=mf.path)
+        if not(os.path.isdir(mp[0])):
+            tar_file.add(mp[0], arcname=mp[1])
             logging.info((
                 "    Adding file to TarFile archive: {}"
-            ).format(path))
+            ).format(mp[0]))
 
     tar_file.close()
-    # set the size of the archive
-    archive.size = os.stat(tar_file_path).st_size
-    archive.save()
+
+    ### end of parallelisation
+
     return tar_file_path
 
+def pack_archives(archive_list, q):
+    """Pack the files in the archive_list into tar files"""
+    for archive_info in archive_list:
+        # first element is tarfile path / archive location
+        tar_file_path = archive_info[0]
+        try:
+            os.unlink(tar_file_path)
+        except:
+            pass
+        # create the tar file
+        tar_file = TarFile(tar_file_path, mode='w')
+        logging.info((
+            "Created TarFile archive file: {}"
+        ).format(tar_file_path))
 
-def pack_request(pr, archive_staging_dir):
+        # second element contains the MigrationFiles for this archive
+        migration_paths = archive_info[1]
+        # loop over the MigrationFiles in the MigrationArchive
+        for mp in migration_paths:
+            # don't add if it's a directory - files under the directory will
+            # be added
+            if not(os.path.isdir(mp[0])):
+                tar_file.add(mp[0], arcname=mp[1])
+                logging.info((
+                    "    Adding file to TarFile archive: {}"
+                ).format(mp[0]))
+        tar_file.close()
+        # calculate digest (element 2) and size (element 3) and add to archive
+        archive_info[2] = calculate_digest(tar_file_path)
+        archive_info[3] = os.stat(tar_file_path).st_size
+
+    q.put(archive_list)
+
+def pack_request(pr, archive_staging_dir, config):
     """Pack a single request.  This has been split out so we can
     parallelise later"""
     # start at the last_archive so that interrupted packing can be resumed
-    st_arch = pr.last_archive
-    n_arch = pr.migration.migrationarchive_set.count()
+    st_arch = 0
+    ed_arch = pr.migration.migrationarchive_set.count()
     # get the archive set here as it might change if we get it in the loop
     archive_set = pr.migration.migrationarchive_set.order_by('pk')
-    for arch_num in range(st_arch, n_arch):
-        # determine which archive to stage (tar)
-        archive = archive_set[arch_num]
-        # stage the archive - i.e. create the tar file
-        # first check whether this archive is to be tarred or not
-        if archive.packed:
-            archive_path = pack_archive(
-                archive_staging_dir,
-                archive,
-                pr
-            )
-            # calculate digest and add to archive
-            archive.digest = calculate_digest(archive_path)
-        else:
+    # get the subset of the archives that we are going to deal with
+    active_archives = archive_set[st_arch:ed_arch]
+    # build a list of the archives we should be packing
+    # each element is a tuple of:
+    # (archive location, [list of files in archive], archive_digest, archive_size)
+    # each "file" in the list of files in archive is actually a tuple of
+    # (location of file on file system, location of file in archive)
+    # we can then pass that off to a multiprocess to do the actual packing
+    # the archive digest and archive size will be filled in once the archive
+    # has been packed
+    archive_list = []
+
+    # create the directory path for the batch
+    request_staging_dir = os.path.join(
+        archive_staging_dir,
+        pr.migration.get_id()
+    )
+    if not (os.path.isdir(request_staging_dir)):
+        os.makedirs(request_staging_dir)
+
+    # build the list of archives and files
+    for archive in active_archives:
+        if not archive.packed:
             archive.digest = "not packed"
-        archive.save()
-        # update the last good archive
-        pr.last_archive += 1
-        pr.save()
+            archive.save()
+            continue
+
+        tar_file_path = os.path.join(request_staging_dir,
+                                     archive.get_filtered_file_names()[0])
+        # get the MigrationFiles belonging to this archive
+        migration_files = archive.migrationfile_set.all()
+        # get a list of files with a full file path
+        migration_paths = []
+        for mf in migration_files:
+            # maintain a tuple of path on filesystem, path inside the tarfile
+            migration_paths.append(
+                (os.path.join(pr.migration.common_path, mf.path), mf.path)
+            )
+        # add to the archive_list so we can tar in parallel later
+        archive_list.append(
+            [tar_file_path,
+             migration_paths,
+             "", # digest
+             0,  # size
+             archive.pk, # id
+            ]
+        )
+    # subdivide the archive list into the number of threads we have and then
+    # dispatch each sublist of archives to its own thread
+    if len(archive_list) > 0:
+        n_threads = config["THREADS"]
+        processes = []
+        for tn in range(0, n_threads):
+            local_archive_list = archive_list[tn::n_threads]
+            q = Queue()
+            p = Process(
+                target = pack_archives,
+                args = (local_archive_list, q)
+            )
+            p.start()
+            processes.append((p, q))
+
+        # block here until all threads have completed
+        for p in processes:
+            p[0].join()
+
+        # get the returned data
+        for p in processes:
+            local_archive_list = p[1].get()
+            # assign the digests and sizes to the archive
+            for la in local_archive_list:
+                archive = pr.migration.migrationarchive_set.get(pk=la[4])
+                archive.digest = la[2]
+                archive.size = la[3]
+                archive.save()
     # the request has completed so transition the request to PUTTING and reset
     # the last archive
     pr.stage = MigrationRequest.PUT_PENDING
@@ -104,7 +181,7 @@ def pack_request(pr, archive_staging_dir):
     pr.save()
 
 
-def put_packing(backend_object):
+def put_packing(backend_object, config):
     """Pack the ArchiveFiles into a TarFile in the ARCHIVE_STAGING_DIR
     for this backend"""
     # get the storage id for the backend object
@@ -124,7 +201,11 @@ def put_packing(backend_object):
             continue
         try:
             pr.lock()
-            pack_request(pr, backend_object.ARCHIVE_STAGING_DIR)
+            pack_request(
+                pr,
+                backend_object.ARCHIVE_STAGING_DIR,
+                config
+            )
             pr.unlock()
         except Exception as e:
             error_string = (
@@ -184,25 +265,59 @@ def unpack_archive(archive_staging_dir, archive, external_id,
 
     tar_file.close()
 
+def unpack_archives(archive_list):
+    # Each element of the archive list is a tuple:
+    # [0] = archive_staging_dir
+    # [1] = archive
+    # [2] = external_id
+    # [3] = target_path
+    # [4] = filelist
+    for archive in archive_list:
+        unpack_archive(archive[0],
+                       archive[1],
+                       archive[2],
+                       archive[3],
+                       archive[4]
+                      )
 
-def unpack_request(gr, archive_staging_dir):
+def unpack_request(gr, archive_staging_dir, config):
     """Unpack a single request.  This has been split out so we can
     parallelise later"""
 
     archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
 
-    # loop over the archives
+    # loop over the archives to create a list of archives to unpack
+    archive_list = []
     for arch_num in range(st_arch, n_arch):
         # determine which archive to unpack
         archive = archive_set[arch_num]
         if archive.packed:
-            unpack_archive(archive_staging_dir, archive,
-                           gr.migration.external_id,
-                           gr.target_path,
-                           gr.filelist)
-        # update the last good archive
-        gr.last_archive += 1
-        gr.save()
+            archive_list.append((archive_staging_dir,
+                                 archive,
+                                 gr.migration.external_id,
+                                 gr.target_path,
+                                 gr.filelist)
+                               )
+
+    # subdivide the archive list into the number of threads we have and then
+    # dispatch each sublist of archives to its own thread
+    processes = []
+    if len(archive_list) > 0:
+        n_threads = config["THREADS"]
+        processes = []
+        for tn in range(0, n_threads):
+            local_archive_list = archive_list[tn::n_threads]
+            p = Process(
+                target = unpack_archives,
+                args = (local_archive_list, )
+            )
+            p.start()
+            processes.append(p)
+
+        # block here until all threads have completed
+        for p in processes:
+            p.join()
+
     # the request has completed so transition the request to PUTTING and reset
     # the last archive
     gr.stage = MigrationRequest.GET_RESTORE
@@ -210,7 +325,7 @@ def unpack_request(gr, archive_staging_dir):
     gr.save()
 
 
-def get_unpacking(backend_object):
+def get_unpacking(backend_object, config):
     """Unpack the ArchiveFiles from a TarFile to a target directory"""
     # get the storage id for the backend object
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
@@ -228,7 +343,11 @@ def get_unpacking(backend_object):
             continue
         try:
             gr.lock()
-            unpack_request(gr, get_download_dir(backend_object, gr))
+            unpack_request(
+                gr,
+                get_download_dir(backend_object, gr),
+                config
+            )
             gr.unlock()
         except Exception as e:
             error_string = (
@@ -238,22 +357,64 @@ def get_unpacking(backend_object):
             mark_migration_failed(gr, error_string, e, upload_mig=True)
 
 
-def process(backend):
+def process(backend, config):
     backend_object = backend()
-    put_packing(backend_object)
-    get_unpacking(backend_object)
+    put_packing(backend_object, config)
+    get_unpacking(backend_object, config)
 
 
-def run(*args):
-    # setup the logging
-    setup_logging(__name__)
-    if len(args) == 0:
+def exit_handler(signal, frame):
+    sys.exit(0)
+
+
+def run_loop(backend, config):
+    # moved this to a function so we can call a one-shot version
+    if backend is None:
         for backend in jdma_control.backends.get_backends():
-            process(backend)
+            process(backend, config)
     else:
-        backend = args[0]
         if not backend in jdma_control.backends.get_backend_ids():
             logging.error("Backend: " + backend + " not recognised.")
         else:
             backend = jdma_control.backends.get_backend_from_id(backend)
-            process(backend)
+            process(backend, config)
+
+
+def run(*args):
+    """Entry point for the Django script run via ``./manage.py runscript``
+    optionally pass the backend_id in as an argument
+    """
+    # setup the logging
+    setup_logging(__name__)
+
+    config = read_process_config("jdma_pack")
+
+    # setup exit signal handling
+    signal.signal(signal.SIGINT, exit_handler)
+    signal.signal(signal.SIGHUP, exit_handler)
+    signal.signal(signal.SIGTERM, exit_handler)
+
+    # process the arguments
+    arg_dict = split_args(args)
+    if "backend" in arg_dict:
+        backend = arg_dict["backend"]
+    else:
+        backend = None
+
+    # decide whether to run as a daemon
+    if "daemon" in arg_dict:
+        if arg_dict["daemon"].lower() == "true":
+            daemon = True
+        else:
+            daemon = False
+    else:
+        daemon = False
+
+    # run as a daemon or one shot
+    if daemon:
+        # loop this indefinitely until the exit signals are triggered
+        while True:
+            run_loop(backend, config)
+            sleep(5)
+    else:
+        run_loop(backend, config)

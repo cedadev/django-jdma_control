@@ -9,7 +9,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 DEBUG = True
-TESTING = True
+TESTING = False #True
 
 
 
@@ -134,4 +134,3 @@ JDMA_LDAP_PRIMARY = "ldap://homer.esc.rl.ac.uk"
 JDMA_LDAP_REPLICAS = ["ldap://marge.esc.rl.ac.uk", "ldap://wiggum.jc.rl.ac.uk"]
 
 LOG_PATH = "/var/log/jdma"
-

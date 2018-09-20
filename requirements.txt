@@ -12,7 +12,7 @@ pytz==2018.3
 six==1.11.0
 feedgen==0.6.1
 feedparser==5.2.1
-pycryptodome==3.4.11
+pycryptodome==3.6.6
 -e git+https://github.com/cedadev/jasmin-ldap.git@v0.3#egg=jasmin-ldap
 -e svn+https://svn.esc.rl.ac.uk/repos/jasmin_et/code/tags/0.3.1.3_Py3.6Specific/elastic_tape#egg=et_tools
 boto3==1.5.30
