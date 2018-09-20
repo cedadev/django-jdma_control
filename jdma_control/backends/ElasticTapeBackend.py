@@ -13,9 +13,9 @@ from bs4 import BeautifulSoup
 from time import sleep
 
 from jdma_control.backends.Backend import Backend
-from jdma_control.backends import ElasticTapeSettings as ET_Settings
 from jdma_control.backends.ConnectionPool import ConnectionPool
 from jdma_control.scripts.common import get_ip_address
+from jdma_control.scripts.config import read_backend_config
 
 # Import elastic_tape client library
 import elastic_tape.client as ET_client
@@ -35,6 +35,7 @@ def get_completed_puts(backend_object):
     storage_id = StorageQuota.get_storage_index("elastictape")
     # list of completed PUTs to return
     completed_PUTs = []
+    ET_Settings = backend_object.ET_Settings
 
     # now loop over the PUT requests
     put_reqs = MigrationRequest.objects.filter(
@@ -46,7 +47,7 @@ def get_completed_puts(backend_object):
     for pr in put_reqs:
         # get a list of synced files for this workspace and user and batch
         holdings_url = "{}?batch={};workspace={};caller={};level=file".format(
-            ET_Settings.ET_HOLDINGS_URL,
+            ET_Settings["ET_HOLDINGS_URL"],
             pr.migration.external_id,
             pr.migration.workspace.workspace,
             pr.migration.user.name
@@ -56,7 +57,7 @@ def get_completed_puts(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise Exception(ET_Settings.ET_ROLE_URL + " is unreachable.")
+            raise Exception(ET_Settings["ET_ROLE_URL"] + " is unreachable.")
 
         # get the "file" tags
         files = bs.select("file")
@@ -90,6 +91,7 @@ def get_completed_gets(backend_object):
     from jdma_control.models import MigrationRequest, StorageQuota, MigrationArchive
     # get the storage id
     storage_id = StorageQuota.get_storage_index("elastictape")
+    ET_Settings = backend_object.ET_Settings
 
     # list of completed GETs to return
     completed_GETs = []
@@ -104,7 +106,7 @@ def get_completed_gets(backend_object):
     for gr in get_reqs:
         # get a list of synced files for this workspace and user and batch
         retrieval_url = "{}?rr_id={};workspace={}".format(
-            ET_Settings.ET_RETRIEVAL_URL,
+            ET_Settings["ET_RETRIEVAL_URL"],
             gr.transfer_id,
             gr.migration.workspace.workspace,
         )
@@ -113,7 +115,7 @@ def get_completed_gets(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise Exception(ET_Settings.ET_RETRIEVAL_URL + " is unreachable.")
+            raise Exception(ET_Settings["ET_RETRIEVAL_URL"] + " is unreachable.")
         # get the first table from beautiful soup
         table = bs.find_all("table")[0]
         # check that a table has been found - there might be a slight
@@ -149,6 +151,7 @@ def get_completed_deletes(backend_object):
     # avoiding a circular dependency
     from jdma_control.models import MigrationRequest, Migration, StorageQuota    # get the storage id
     storage_id = StorageQuota.get_storage_index("elastictape")
+    ET_Settings = backend_object.ET_Settings
 
     # list of completed DELETEs to return
     completed_DELETEs = []
@@ -163,7 +166,7 @@ def get_completed_deletes(backend_object):
         deleted = True
         # get a list of synced batches for this workspace and user
         holdings_url = "{}?workspace={};caller={};level=batch".format(
-            ET_Settings.ET_HOLDINGS_URL,
+            ET_Settings["ET_HOLDINGS_URL"],
             dr.migration.workspace.workspace,
             dr.migration.user.name
         )
@@ -172,7 +175,7 @@ def get_completed_deletes(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise Exception(ET_Settings.ET_ROLE_URL + " is unreachable.")
+            raise Exception(ET_Settings["ET_ROLE_URL"] + " is unreachable.")
         # if the dr.migration.external_id is not in the list of batches
         # then the delete has completed
         batches = bs.select("batch")
@@ -187,17 +190,17 @@ def get_completed_deletes(backend_object):
     return completed_DELETEs
 
 
-def user_in_workspace(jdma_user, jdma_workspace):
+def user_in_workspace(jdma_user, jdma_workspace, ET_Settings):
     """Determine whether a user is in a workspace by using requests to fetch
     a URL and beautifulsoup to parse the table returned.
     We'll ask Kevin O'Neill to provide a JSON version of this."""
 
     # get from requests
-    r = requests.get(ET_Settings.ET_ROLE_URL)
+    r = requests.get(ET_Settings["ET_ROLE_URL"])
     if r.status_code == 200:
         bs = BeautifulSoup(r.content, "html5lib")
     else:
-        raise Exception(ET_Settings.ET_ROLE_URL + " is unreachable.")
+        raise Exception(ET_Settings["ET_ROLE_URL"] + " is unreachable.")
 
     # parse into dictionary from table
     gws_roles = {}
@@ -217,7 +220,7 @@ def user_in_workspace(jdma_user, jdma_workspace):
 
     # no roles were returned
     if gws_roles == {}:
-        raise Exception(ET_Settings.ET_ROLE_URL + " did not return a valid list"
+        raise Exception(ET_Settings["ET_ROLE_URL"] + " did not return a valid list"
                         " of roles")
     # check if workspace exists
     if jdma_workspace not in gws_roles:
@@ -226,13 +229,13 @@ def user_in_workspace(jdma_user, jdma_workspace):
         return jdma_user in gws_roles[jdma_workspace]
 
 
-def workspace_quota_remaining(jdma_user, jdma_workspace):
+def workspace_quota_remaining(jdma_user, jdma_workspace, ET_Settings):
     """Get the workspace quota by using requests to fetch a URL.  Unfortunately,
     the JSON version of this URL returns ill-formatted JSON with a XML header!
     So we can't just parse that, and we use the regular HTML table view and
     parse using beautifulsoup again."""
     # form the URL
-    url = "{}{}{}{}{}".format(ET_Settings.ET_QUOTA_URL,
+    url = "{}{}{}{}{}".format(ET_Settings["ET_QUOTA_URL"],
                               "?workspace=", jdma_workspace,
                               ";caller=", jdma_user)
     # fetch using requests
@@ -265,8 +268,14 @@ class ElasticTapeBackend(Backend):
 
     def __init__(self):
         """Need to set the verification directory and archive staging directory"""
-        self.VERIFY_DIR = ET_Settings.VERIFY_DIR
-        self.ARCHIVE_STAGING_DIR = ET_Settings.ARCHIVE_STAGING_DIR
+        self.ET_Settings = read_backend_config(self.get_id())
+        self.VERIFY_DIR = self.ET_Settings["VERIFY_DIR"]
+        self.ARCHIVE_STAGING_DIR = self.ET_Settings["ARCHIVE_STAGING_DIR"]
+
+    def exit(self):
+        """Shutdown the backend. Do nothing for ET."""
+        return
+
 
     def available(self, credentials):
         """Return whether the elastic tape is available or not"""
@@ -281,7 +290,8 @@ class ElasticTapeBackend(Backend):
             completed_PUTs = get_completed_puts(self)
             completed_GETs = get_completed_gets(self)
             completed_DELETEs = get_completed_deletes(self)
-            # pause if no transfers
+        except SystemExit:
+            return [], [], []
         except Exception as e:
             raise Exception(e)
         return completed_PUTs, completed_GETs, completed_DELETEs
@@ -300,9 +310,15 @@ class ElasticTapeBackend(Backend):
         (There are no required credentials!)
         """
         if mode == "upload" or mode == "delete":
-            conn = ET_client.client.client(ET_Settings.PUT_HOST, ET_Settings.PORT)
+            conn = ET_client.client.client(
+                self.ET_Settings["PUT_HOST"],
+                self.ET_Settings["PORT"]
+            )
         elif mode == "download":
-            conn = ET_client.client.client(ET_Settings.GET_HOST, ET_Settings.PORT)
+            conn = ET_client.client.client(
+                self.ET_Settings["GET_HOST"],
+                self.ET_Settings["PORT"]
+            )
 
         conn.connect()
         # save the user and workspace
@@ -356,30 +372,26 @@ class ElasticTapeBackend(Backend):
             retrieve_batch = batch.retrieve()
 
             # get the request id and store it in the migration request
-            reqID = conn.msgIface.retrieveBatch( retrieve_batch )
+            reqID = conn.msgIface.retrieveBatch(retrieve_batch)
             get_req.transfer_id = reqID
             get_req.save()
 
-            conn.msgIface.sendStartRetrieve( reqID )
+            conn.msgIface.sendStartRetrieve(reqID)
 
             downloadThreads = []
             handler = ET_client.client.DownloadThread
-            if os.getenv('ET_MP'):
-                handler = DownloadProcess
-                global logger
-                logger = multiprocessing.get_logger()
 
-            for i in range( ET_Settings.THREADS ):
+            for i in range(self.ET_Settings["THREADS"]):
                 t = handler()
                 t.daemon = True
-                downloadThreads.append( t )
+                downloadThreads.append(t)
                 t.setup(reqID, get_req.target_path, conn.host, conn.port)
                 t.start()
 
-            while not conn.msgIface.checkRRComplete( reqID ):
-                sleep( 5 )
+            while not conn.msgIface.checkRRComplete(reqID):
+                sleep(5)
 
-            bad_files = conn.msgIface.FinishRR( reqID )
+            bad_files = conn.msgIface.FinishRR(reqID)
             for t in downloadThreads:
                 t.stop()
                 t.join()
@@ -453,7 +465,9 @@ class ElasticTapeBackend(Backend):
         # elastic tape permission - fetch from URL and use beautifulsoup to
         # parse the returned table into something meaningful
         et_permission = user_in_workspace(
-            conn.jdma_user, conn.jdma_workspace.workspace
+            conn.jdma_user,
+            conn.jdma_workspace.workspace,
+            self.ET_Settings
         )
 
         return gws_permission & et_permission
@@ -468,7 +482,9 @@ class ElasticTapeBackend(Backend):
 
         # elastic tape permission
         et_permission = user_in_workspace(
-            conn.jdma_user, conn.jdma_workspace.workspace
+            conn.jdma_user,
+            conn.jdma_workspace.workspace,
+            self.ET_Settings
         )
 
         return gws_permission & et_permission
@@ -485,7 +501,9 @@ class ElasticTapeBackend(Backend):
 
         # elastic tape permission
         et_permission = user_in_workspace(
-            conn.jdma_user, conn.jdma_workspace.workspace
+            conn.jdma_user,
+            conn.jdma_workspace.workspace,
+            self.ET_Settings
         )
 
         return gws_permission & et_permission
@@ -508,7 +526,9 @@ class ElasticTapeBackend(Backend):
 
         # get the quota from the elastic tape feed
         et_quota_remaining = workspace_quota_remaining(
-            conn.jdma_user, conn.jdma_workspace.workspace
+            conn.jdma_user,
+            conn.jdma_workspace.workspace,
+            self.ET_Settings,
         )
 
         return (jdma_quota_remaining > 0) & (et_quota_remaining > 0)
@@ -533,4 +553,4 @@ class ElasticTapeBackend(Backend):
         """Minimum recommend size for elastic tape = 2GB? (check with Kevin
         O'Neil)
         """
-        return ET_Settings.OBJECT_SIZE
+        return int(self.ET_Settings["OBJECT_SIZE"])

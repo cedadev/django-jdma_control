@@ -15,6 +15,17 @@ FileInfo = namedtuple('FileInfo',
                        'unix_group_id', 'unix_permission', 'is_dir'],
                        verbose=False)
 
+def split_args(args):
+    # split args that are in the form somekey=somevalue into a dictionary
+    arg_dict = {}
+    for a in args:
+        try:
+            split_args = a.split("=")
+            arg_dict[split_args[0]] = split_args[1]
+        except:
+            raise Exception("Error in arguments")
+    return arg_dict
+
 def calculate_digest(filename):
     # Calculate the hex digest of the file, using a buffer
     BUFFER_SIZE = 256 * 1024  # (256KB) - adjust this
@@ -57,7 +68,7 @@ def setup_logging(module_name):
     logging.basicConfig(filename=log_fname, level=logging.DEBUG)
 
 
-def get_file_info_tuple(filepath, user_name, conn):
+def get_file_info_tuple(filepath, user_name, ldap_conn):
     """Get all the info for a file, and return in a tuple.
     Info is: size, SHA-256 digest, unix-uid, unix-gid, unix-permissions, dir?"""
     # get the permissions etc. of the original file
@@ -74,7 +85,7 @@ def get_file_info_tuple(filepath, user_name, conn):
     # query to find username with uidNumber matching fstat.st_uid - default to
     # user
     query = Query(
-        conn,
+        ldap_conn,
         base_dn=settings.JDMA_LDAP_BASE_USER
     ).filter(uidNumber=fstat.st_uid)
     if len(query) == 0 or len(query[0]) == 0:
@@ -85,7 +96,7 @@ def get_file_info_tuple(filepath, user_name, conn):
     # query to find group with gidNumber matching fstat.gid - default to users
     # group
     query = Query(
-        conn,
+        ldap_conn,
         base_dn=settings.JDMA_LDAP_BASE_GROUP
     ).filter(gidNumber=fstat.st_gid)
     if len(query) == 0 or len(query[0]) == 0:
@@ -170,7 +181,7 @@ def get_archive_set_from_get_request(gr):
             migrationfile__path__in=filelist_no_cp
         ).order_by('pk')
     # make sure we loop over all the archives in the (sub)set
-    st_arch = gr.last_archive
+    st_arch = 0#gr.last_archive
     n_arch = archive_set.count()
     return archive_set, st_arch, n_arch
 

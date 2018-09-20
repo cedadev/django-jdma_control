@@ -14,12 +14,15 @@ import ftplib
 from django.db.models import Q
 
 from jdma_control.backends.Backend import Backend
-from jdma_control.backends import FTPSettings as FTP_Settings
+from jdma_control.scripts.config import read_backend_config
+from jdma_control.backends.ConnectionPool import ConnectionPool
 from jdma_control.backends import AES_tools
 from jdma_control.scripts.common import get_archive_set_from_get_request
 from jdma_control.scripts.common import get_verify_dir, get_staging_dir
 import jdma_site.settings as settings
 
+import multiprocessing
+import signal
 
 def get_completed_puts(backend_object):
     """Get all the completed puts for the FTP backend"""
@@ -43,7 +46,7 @@ def get_completed_puts(backend_object):
         # decrypt the credentials
         credentials = AES_tools.AES_decrypt_dict(key, pr.credentials)
         try:
-            ftp = ftplib.FTP(host=FTP_Settings.FTP_ENDPOINT,
+            ftp = ftplib.FTP(host=backend_object.FTP_Settings["FTP_ENDPOINT"],
                              user=credentials['username'],
                              passwd=credentials['password'])
             # loop over each archive in the migration
@@ -172,7 +175,7 @@ def get_completed_deletes(backend_object):
         credentials = AES_tools.AES_decrypt_dict(key, dr.credentials)
         try:
             # create a connection to the object store
-            ftp = ftplib.FTP(host=FTP_Settings.FTP_ENDPOINT,
+            ftp = ftplib.FTP(host=backend_object.FTP_Settings["FTP_ENDPOINT"],
                              user=credentials['username'],
                              passwd=credentials['password'])
             # if the external_id directory has been deleted then the
@@ -191,6 +194,186 @@ def get_completed_deletes(backend_object):
             raise Exception(e)
     return completed_DELETEs
 
+
+class FTP_DownloadProcess(multiprocessing.Process):
+    """Download thread for FTP backend."""
+    def setup(self,
+              filelist,
+              external_id,
+              req_number,
+              target_dir,
+              credentials,
+              backend_object,
+              thread_number
+        ):
+        self.filelist = filelist
+        self.conn = backend_object.connection_pool.find_or_create_connection(
+            backend_object,
+            req_number = req_number,
+            credentials = credentials,
+            mode = "download",
+            thread_number = thread_number,
+            uid = "GET")
+        # need these to carry out the transfer
+        self.external_id = external_id
+        self.req_number = req_number
+        self.target_dir = target_dir
+        # need these to close the connection
+        self.backend_object = backend_object
+        self.thread_number = thread_number
+
+    def run(self):
+        """Download all the files in the sub file list."""
+        # change the working directory to the external batch id
+        try:
+            self.conn.cwd("/" + self.external_id)
+            for filename in self.filelist:
+                # external id is the bucket name, add this to the file name
+                download_file_path = os.path.join(self.target_dir, filename)
+                # check that the the sub path exists
+                sub_path = os.path.split(download_file_path)[0]
+                # The "it's better to ask forgiveness method!"
+                try:
+                    os.makedirs(sub_path)
+                except:
+                    pass
+                # open the download file
+                fh = open(download_file_path, 'wb')
+                self.conn.retrbinary("RETR " + filename, fh.write)
+                fh.close()
+        except SystemExit:
+            pass
+
+
+    def exit(self):
+        """FTP Download exit handler."""
+        if settings.TESTING:
+            print ("   Exit FTP_DownloadProcess")
+        self.backend_object.connection_pool.close_connection(
+            self.backend_object,
+            req_number = self.req_number,
+            mode = "download",
+            thread_number = self.thread_number,
+            uid = "GET"
+        )
+
+
+class FTP_UploadProcess(multiprocessing.Process):
+    """Upload thread for FTP backend."""
+    def setup(self,
+              filelist,
+              external_id,
+              req_number,
+              prefix,
+              credentials,
+              backend_object,
+              thread_number
+        ):
+        self.filelist = filelist
+        self.conn = backend_object.connection_pool.find_or_create_connection(
+            backend_object,
+            req_number = req_number,
+            credentials = credentials,
+            mode = "upload",
+            thread_number = thread_number,
+            uid = "PUT")
+
+        # need these to carry out the transfer
+        self.req_number = req_number
+        self.external_id = external_id
+        self.prefix = prefix
+        # need these to close the connection
+        self.backend_object = backend_object
+        self.thread_number = thread_number
+
+    def run(self):
+        # we have multiple files so upload them one at once
+        # upload the multiple files in the file_list
+        # change the working directory to the external batch id
+        try:
+            self.conn.cwd("/" + self.external_id)
+
+            for filename in self.filelist:
+                # change to the directory where the file will be deposited
+                ftp_file_name = os.path.relpath(filename, self.prefix)
+                # open the file from the archive_path in binary mode
+                fh = open(filename, 'rb')
+                self.conn.storbinary("STOR " + ftp_file_name, fh)
+                fh.close()
+        except SystemExit:
+            pass
+
+    def exit(self):
+        """FTP Upload exit handler."""
+        if settings.TESTING:
+            print ("   Exit FTP_UploadProcess")
+
+        self.backend_object.connection_pool.close_connection(
+            self.backend_object,
+            req_number = self.req_number,
+            mode = "upload",
+            thread_number = self.thread_number,
+            uid = "PUT"
+        )
+
+
+class FTP_DeleteProcess(multiprocessing.Process):
+    """Delete thread for FTP backend."""
+    def setup(self,
+              filelist,
+              external_id,
+              req_number,
+              credentials,
+              backend_object,
+              thread_number
+        ):
+        self.filelist = filelist
+        self.external_id = external_id
+        self.conn = backend_object.connection_pool.find_or_create_connection(
+            backend_object,
+            req_number = req_number,
+            credentials = credentials,
+            mode = "upload",
+            thread_number = thread_number,
+            uid = "DELETE")
+        # need these to carry out the transfer
+        self.req_number = req_number
+        # need these to close the connection
+        self.backend_object = backend_object
+        self.thread_number = thread_number
+
+    def run(self):
+        # we can delete multiple objects, upto a 1000 at a time
+        # a maximum of 1000 will be passed by the calling function
+        self.conn.cwd("/" + self.external_id)
+        try:
+            for filepath in self.filelist:
+                # remove the file
+                try:
+                    conn.delete(filepath)
+                except ftplib.error_perm as e:
+                    # handle directory already created
+                    if not '550' in e.args[0]:
+                        raise Exception(e)
+                    else:
+                        continue
+        except SystemExit:
+            pass
+
+    def exit(self):
+        """FTP Delete exit handler."""
+        if settings.TESTING:
+            print ("   Exit FTP_DeleteProcess")
+
+        self.backend_object.connection_pool.close_connection(
+            self.backend_object,
+            req_number = self.req_number,
+            mode = "upload",
+            thread_number = self.thread_number,
+            uid = "DELETE"
+        )
+
+
 class FTPBackend(Backend):
     """Class for a JASMIN Data Migration App backend which targets a FTP server
     with Python ftplib .
@@ -198,15 +381,35 @@ class FTPBackend(Backend):
 
     def __init__(self):
         """Need to set the verification directory and logging"""
-        self.VERIFY_DIR = FTP_Settings.VERIFY_DIR
-        self.ARCHIVE_STAGING_DIR = FTP_Settings.ARCHIVE_STAGING_DIR
+        self.FTP_Settings = read_backend_config(self.get_id())
+        self.VERIFY_DIR = self.FTP_Settings["VERIFY_DIR"]
+        self.ARCHIVE_STAGING_DIR = self.FTP_Settings["ARCHIVE_STAGING_DIR"]
+        self.connection_pool = ConnectionPool()
+        self.download_threads = []
+        self.upload_threads = []
+        self.delete_threads = []
+
+    def exit(self):
+        """Shutdown the backend. Join all the threads."""
+        # join the threads
+        if settings.TESTING:
+            print ("Exit FTPBackend")
+        for dt in self.download_threads:
+            dt.join()
+            dt.exit()
+        for ut in self.upload_threads:
+            ut.join()
+            ut.exit()
+        for dt in self.delete_threads:
+            dt.join()
+            dt.exit()
 
     def available(self, credentials):
         """Return whether the backend storage is avaliable at the moment
         - i.e. switched on or not!
         """
         try:
-            conn = ftplib.FTP(host=FTP_Settings.FTP_ENDPOINT,
+            conn = ftplib.FTP(host=self.FTP_Settings["FTP_ENDPOINT"],
                               user=credentials['username'],
                               passwd=credentials['password'])
             conn.quit()
@@ -221,6 +424,8 @@ class FTPBackend(Backend):
             completed_GETs = get_completed_gets(self)
             completed_DELETEs = get_completed_deletes(self)
             # pause if no transfers
+        except SystemExit:
+            return [], [], []
         except Exception as e:
             raise Exception(e)
         return completed_PUTs, completed_GETs, completed_DELETEs
@@ -237,15 +442,18 @@ class FTPBackend(Backend):
     def create_connection(self, user, workspace, credentials, mode="upload"):
         """Create a connection to the FTP server, using the supplied credentials.
         """
-        ftp = ftplib.FTP(host=FTP_Settings.FTP_ENDPOINT,
+        ftp = ftplib.FTP(host=self.FTP_Settings["FTP_ENDPOINT"],
                          user=credentials['username'],
                          passwd=credentials['password'])
         ftp.jdma_user = user
         ftp.jdma_workspace = workspace
+        ftp.credentials = credentials
         return ftp
 
     def close_connection(self, conn):
         """Close the connection to the backend"""
+        # close the connections in the connection pool
+        self.connection_pool.close_all_connections()
         conn.quit()
 
     def download_files(self, conn, get_req, file_list, target_dir):
@@ -253,22 +461,39 @@ class FTPBackend(Backend):
         """
         get_req.transfer_id = get_req.migration.external_id
         get_req.save()
-        # change the working directory to the external batch id
-        conn.cwd("/" + get_req.migration.external_id)
-        for object_name in file_list:
-            # external id is the bucket name, add this to the file name
-            download_file_path = os.path.join(target_dir, object_name)
-            # check that the the sub path exists
-            sub_path = os.path.split(download_file_path)[0]
-            # The "it's better to ask forgiveness method!"
-            try:
-                os.makedirs(sub_path)
-            except:
-                pass
-            # open the download file
-            fh = open(download_file_path, 'wb')
-            conn.retrbinary("RETR " + object_name, fh.write)
-            fh.close()
+
+        # now do the download via a multiprocess Process
+        n_files = len(file_list)
+        n_threads = int(self.FTP_Settings["THREADS"])
+        n_files_per_list = float(n_files) / n_threads
+
+        # keep tabs on the threads created so we can call join later
+        self.download_threads = []
+
+        for n in range(0, n_threads):
+            start = int(n * n_files_per_list)
+            end = int((n+1) * n_files_per_list + 0.5)
+            if (end > n_files):
+                end = n_files
+            subset_filelist = file_list[start:end]
+            # we now have a subsets of the files for a single thread, create a
+            # process to upload each set of files
+            thread = FTP_DownloadProcess()
+            self.download_threads.append(thread)
+            # setup the thread with the filelist, bucket_name, target directory
+            # this backend and the thread number
+            thread.setup(subset_filelist,
+                         get_req.migration.external_id,
+                         get_req.pk,
+                         target_dir,
+                         conn.credentials,
+                         self,
+                         n)
+            thread.start()
+
+        for thread in self.download_threads:
+            thread.join()
+
         return len(file_list)
 
     def __get_new_directory_name(self, conn):
@@ -325,10 +550,9 @@ class FTPBackend(Backend):
             put_req.migration.external_id = dir_name
             put_req.migration.save()
 
-        # change the working directory to the external batch id
-        conn.cwd(put_req.migration.external_id)
-
-        dir_list = self.__get_list_of_directories(self, file_list, prefix)
+        # get a list of just the directories, not the files
+        dir_list = self.__get_list_of_directories(file_list, prefix)
+        conn.cwd("/" + put_req.migration.external_id)
 
         # create the directories from this directory list
         for path in dir_list:
@@ -341,42 +565,89 @@ class FTPBackend(Backend):
                 else:
                     continue
 
-        # upload the multiple files in the file_list
-        for archive_path in file_list:
-            # change to the directory where the file will be deposited
-            ftp_file_name = os.path.relpath(archive_path, prefix)
-            # open the file from the archive_path in binary mode
-            fh = open(archive_path, 'rb')
-            conn.storbinary("STOR " + ftp_file_name, fh)
-            fh.close()
+        # now do the upload via a multiprocess Process
+        n_files = len(file_list)
+        n_threads = int(self.FTP_Settings["THREADS"])
+        n_files_per_list =  float(n_files) / n_threads
+
+        # keep tabs on the threads created so we can call join later
+        self.upload_threads = []
+
+        for n in range(0, n_threads):
+            start = int(n * n_files_per_list)
+            end = int((n+1) * n_files_per_list + 0.5)
+            if (end > n_files):
+                end = n_files
+            subset_filelist = file_list[start:end]
+            # we now have a subsets of the files for a single thread, create a
+            # process to upload each set of files
+            thread = FTP_UploadProcess()
+            self.upload_threads.append(thread)
+            # setup the thread with the filelist, bucket_name, target directory
+            # this backend and the thread number
+            thread.setup(subset_filelist,
+                         put_req.migration.external_id,
+                         put_req.pk,
+                         prefix,
+                         conn.credentials,
+                         self,
+                         n)
+            thread.start()
+
+        for thread in self.upload_threads:
+            thread.join()
 
         return len(file_list)
 
     def delete_batch(self, conn, del_req, batch_id):
         """Delete a batch from the FTP server"""
+        del_req.transfer_id = del_req.migration.external_id
+        del_req.save()
+
         archive_set = del_req.migration.migrationarchive_set.order_by('pk')
 
         # change the working directory to the external batch id
         conn.cwd("/" + del_req.migration.external_id)
         dirs_to_delete = []
+        file_list = []
         for archive in archive_set:
             # get the list of files for this archive
-            file_list = archive.get_filtered_file_names()
+            file_list.extend(archive.get_filtered_file_names())
             # get the directories those files belong to and add to the global
             # list of directories
             dir_list = self.__get_list_of_directories(file_list)
             dirs_to_delete.extend(dir_list)
 
-            for file_path in file_list:
-                # remove the file
-                try:
-                    conn.delete(file_path)
-                except ftplib.error_perm as e:
-                    # handle directory already created
-                    if not '550' in e.args[0]:
-                        raise Exception(e)
-                    else:
-                        continue
+        # now do the download via a multiprocess Process
+        n_files = len(file_list)
+        n_threads = int(self.FTP_Settings["THREADS"])
+        n_files_per_list =  float(n_files) / n_threads
+        # keep tabs on the threads created so we can call join later
+        self.delete_threads = []
+
+        for n in range(0, n_threads):
+            start = int(n * n_files_per_list)
+            end = int((n+1) * n_files_per_list + 0.5)
+            if (end > n_files):
+                end = n_files
+            subset_filelist = file_list[start:end]
+            # we now have a subsets of the files for a single thread, create a
+            # process to upload each set of files
+            thread = FTP_DeleteProcess()
+            self.delete_threads.append(thread)
+            # setup the thread with the filelist, bucket_name, target directory
+            # this backend and the thread number
+            thread.setup(subset_filelist,
+                         del_req.migration.external_id,
+                         del_req.pk,
+                         conn.credentials,
+                         self,
+                         n)
+            thread.start()
+
+        for thread in self.delete_threads:
+            thread.join()
+
         # delete the directories that have been collected - do it backwards:
         for del_dir in dirs_to_delete[::-1]:
             try:
@@ -483,4 +754,4 @@ class FTPBackend(Backend):
         This should be overloaded in the inherited (super) classes
         """
         # in bytes - assume this is filesystem, so "optimum" is 32MB
-        return FTP_Settings.OBJECT_SIZE
+        return self.FTP_Settings["OBJECT_SIZE"]

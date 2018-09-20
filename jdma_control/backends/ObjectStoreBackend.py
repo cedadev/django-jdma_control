@@ -15,11 +15,15 @@ import boto3
 from django.db.models import Q
 
 from jdma_control.backends.Backend import Backend
-from jdma_control.backends import ObjectStoreSettings as OS_Settings
+from jdma_control.scripts.config import read_backend_config
+from jdma_control.backends.ConnectionPool import ConnectionPool
 from jdma_control.backends import AES_tools
 from jdma_control.scripts.common import get_archive_set_from_get_request
-from jdma_control.scripts.common import get_verify_dir, get_staging_dir
+from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
 import jdma_site.settings as settings
+
+import multiprocessing
+import signal
 
 def get_completed_puts(backend_object):
     """Get all the completed puts for the ObjectStore"""
@@ -44,9 +48,12 @@ def get_completed_puts(backend_object):
         credentials = AES_tools.AES_decrypt_dict(key, pr.credentials)
         try:
             # create a connection to the object store
-            s3c = boto3.client("s3", endpoint_url=OS_Settings.S3_ENDPOINT,
-                               aws_access_key_id=credentials['access_key'],
-                               aws_secret_access_key=credentials['secret_key'])
+            s3c = boto3.client(
+                "s3",
+                endpoint_url=backend_object.OS_Settings["S3_ENDPOINT"],
+                aws_access_key_id=credentials['access_key'],
+                aws_secret_access_key=credentials['secret_key']
+            )
             # loop over each archive in the migration
             archive_set = pr.migration.migrationarchive_set.order_by('pk')
             # counter for number of uploaded archives
@@ -109,7 +116,7 @@ def get_completed_gets(backend_object):
                 staging_dir = get_verify_dir(backend_object, gr)
             elif gr.stage == MigrationRequest.GETTING:
                 if archive.packed:
-                    staging_dir = get_staging_dir(backend_object, gr)
+                    staging_dir = get_download_dir(backend_object, gr)
                 else:
                     staging_dir = gr.target_path
             # now loop over each file in the archive
@@ -119,6 +126,7 @@ def get_completed_gets(backend_object):
             )
             for file_name in file_name_list:
                 file_path = os.path.join(staging_dir, file_name)
+                print(file_path)
                 try:
                     # just rely on exception thown if file does not exist yet
                     # now check for size
@@ -167,9 +175,12 @@ def get_completed_deletes(backend_object):
         credentials = AES_tools.AES_decrypt_dict(key, dr.credentials)
         try:
             # create a connection to the object store
-            s3c = boto3.client("s3", endpoint_url=OS_Settings.S3_ENDPOINT,
-                               aws_access_key_id=credentials['access_key'],
-                               aws_secret_access_key=credentials['secret_key'])
+            s3c = boto3.client(
+                "s3",
+                endpoint_url=backend_object.OS_Settings["S3_ENDPOINT"],
+                aws_access_key_id=credentials['access_key'],
+                aws_secret_access_key=credentials['secret_key']
+            )
             # if the bucket has been deleted then the deletion has completed
             buckets = s3c.list_buckets()
             if ('Buckets' not in buckets
@@ -180,6 +191,161 @@ def get_completed_deletes(backend_object):
     return completed_DELETEs
 
 
+class OS_DownloadProcess(multiprocessing.Process):
+    """Download thread for Object Store backend."""
+    def setup(self,
+              filelist,
+              external_id,
+              req_number,
+              target_dir,
+              credentials,
+              backend_object,
+              thread_number
+        ):
+        self.filelist = filelist
+        self.conn = backend_object.connection_pool.find_or_create_connection(
+            backend_object,
+            req_number = req_number,
+            credentials = credentials,
+            mode = "download",
+            thread_number = thread_number,
+            uid = "GET")
+        # need these to carry out the transfer
+        self.external_id = external_id
+        self.req_number = req_number
+        self.target_dir = target_dir
+        # need these to close the connection
+        self.backend_object = backend_object
+        self.thread_number = thread_number
+
+    def run(self):
+        """Upload all the files in the sub file list."""
+        try:
+            for object_name in self.filelist:
+                # external id is the bucket name, add this to the file name
+                download_file_path = os.path.join(self.target_dir, object_name)
+                # check that the the sub path exists
+                sub_path = os.path.split(download_file_path)[0]
+                # The "it's better to ask forgiveness method!"
+                try:
+                    os.makedirs(sub_path)
+                except:
+                    pass
+                self.conn.download_file(
+                    self.external_id,
+                    object_name,
+                    download_file_path
+                )
+        except SystemExit:
+            pass
+
+    def exit(self):
+        """Exit the process"""
+        self.backend_object.connection_pool.close_connection(
+            self.backend_object,
+            req_number = self.req_number,
+            mode = "download",
+            thread_number = self.thread_number,
+            uid = "GET"
+        )
+
+
+class OS_UploadProcess(multiprocessing.Process):
+    """Upload thread for Object Store backend."""
+    def setup(self,
+              filelist,
+              external_id,
+              req_number,
+              prefix,
+              credentials,
+              backend_object,
+              thread_number
+        ):
+        self.filelist = filelist
+        self.conn = backend_object.connection_pool.find_or_create_connection(
+            backend_object,
+            req_number = req_number,
+            credentials = credentials,
+            mode = "upload",
+            thread_number = thread_number,
+            uid = "PUT")
+        # need these to carry out the transfer
+        self.req_number = req_number
+        self.external_id = external_id
+        self.prefix = prefix
+        # need these to close the connection
+        self.backend_object = backend_object
+        self.thread_number = thread_number
+
+    def run(self):
+        # we have multiple files so upload them one at once
+        try:
+            for filename in self.filelist:
+                object_name = os.path.relpath(filename, self.prefix)
+                self.conn.upload_file(filename,
+                                 self.external_id,
+                                 object_name)
+        except SystemExit:
+            pass
+
+    def exit(self):
+        """Exit the process"""
+        self.backend_object.connection_pool.close_connection(
+            self.backend_object,
+            req_number = self.req_number,
+            mode = "upload",
+            thread_number = self.thread_number,
+            uid = "PUT"
+        )
+
+
+class OS_DeleteProcess(multiprocessing.Process):
+    """Delete thread for Object Store backend."""
+    def setup(self,
+              object_list,
+              external_id,
+              req_number,
+              credentials,
+              backend_object,
+              thread_number
+        ):
+        self.object_list = object_list
+        self.external_id = external_id
+        self.conn = backend_object.connection_pool.find_or_create_connection(
+            backend_object,
+            req_number = req_number,
+            credentials = credentials,
+            mode = "upload",
+            thread_number = thread_number,
+            uid = "DELETE")
+        # need these to carry out the transfer
+        self.req_number = req_number
+        # need these to close the connection
+        self.backend_object = backend_object
+        self.thread_number = thread_number
+
+    def run(self):
+        # we can delete multiple objects, upto a 1000 at a time
+        # a maximum of 1000 will be passed by the calling function
+        try:
+            self.conn.delete_objects(
+                Bucket = self.external_id,
+                Delete = self.object_list
+            )
+        except SystemExit:
+            pass
+
+    def exit(self):
+        """Exit the process"""
+        self.backend_object.connection_pool.close_connection(
+            self.backend_object,
+            req_number = self.req_number,
+            mode = "upload",
+            thread_number = self.thread_number,
+            uid = "DELETE"
+        )
+
+
 class ObjectStoreBackend(Backend):
     """Class for a JASMIN Data Migration App backend which targets an Object
     Store with S3 HTTP API.
@@ -187,13 +353,22 @@ class ObjectStoreBackend(Backend):
 
     def __init__(self):
         """Need to set the verification directory and logging"""
-        self.VERIFY_DIR = OS_Settings.VERIFY_DIR
-        self.ARCHIVE_STAGING_DIR = OS_Settings.ARCHIVE_STAGING_DIR
+        self.OS_Settings = read_backend_config(self.get_id())
+        self.VERIFY_DIR = self.OS_Settings["VERIFY_DIR"]
+        self.ARCHIVE_STAGING_DIR = self.OS_Settings["ARCHIVE_STAGING_DIR"]
+        self.connection_pool = ConnectionPool()
+        self.download_threads = []
+        self.upload_threads = []
+        self.delete_threads = []
+
+    def exit(self):
+        """Shutdown the backend. Join all the threads."""
+        self.connection_pool.close_all_connections()
 
     def available(self, credentials):
         """Return whether the object store is available or not"""
         try:
-            s3c = boto3.client("s3", endpoint_url=OS_Settings.S3_ENDPOINT,
+            s3c = boto3.client("s3", endpoint_url=self.OS_Settings["S3_ENDPOINT"],
                                aws_access_key_id=credentials['access_key'],
                                aws_secret_access_key=credentials['secret_key'])
             s3c.list_buckets()
@@ -207,13 +382,15 @@ class ObjectStoreBackend(Backend):
             completed_PUTs = get_completed_puts(self)
             completed_GETs = get_completed_gets(self)
             completed_DELETEs = get_completed_deletes(self)
+        except SystemExit:
+            return [],[],[]
         except Exception as e:
             raise Exception(e)
         return completed_PUTs, completed_GETs, completed_DELETEs
 
     def pack_data(self):
         """Should the data be packed into a tarfile for this backend?"""
-        return False
+        return True
 
     def piecewise(self):
         """For the object store each archive can be uploaded one by one
@@ -222,17 +399,20 @@ class ObjectStoreBackend(Backend):
 
     def create_connection(self, user, workspace, credentials, mode="upload"):
         """Create connection to Object Store, using the supplied credentials"""
-        s3c = boto3.client("s3", endpoint_url=OS_Settings.S3_ENDPOINT,
+        s3c = boto3.client("s3", endpoint_url=self.OS_Settings["S3_ENDPOINT"],
                            aws_access_key_id=credentials['access_key'],
                            aws_secret_access_key=credentials['secret_key'])
         s3c.jdma_user = user
         s3c.jdma_workspace = workspace
+        # store a copy of the credentials for the multiprocessing
+        s3c.credentials = credentials
         return s3c
 
     def close_connection(self, conn):
         """Close the connection to the backend.  Do nothing for the object store
+        except to close the subprocess connections
         """
-        return
+        self.connection_pool.close_all_connections()
 
     def download_files(self, conn, get_req, file_list, target_dir):
         """Download a batch of files from the Object Store to a target
@@ -240,21 +420,40 @@ class ObjectStoreBackend(Backend):
         """
         get_req.transfer_id = get_req.migration.external_id
         get_req.save()
-        for object_name in file_list:
-            # external id is the bucket name, add this to the file name
-            download_file_path = os.path.join(target_dir, object_name)
-            # check that the the sub path exists
-            sub_path = os.path.split(download_file_path)[0]
-            # The "it's better to ask forgiveness method!"
-            try:
-                os.makedirs(sub_path)
-            except:
-                pass
-            conn.download_file(
-                get_req.migration.external_id,
-                object_name,
-                download_file_path
-            )
+        # to take advantage of multiprocesser / threading we divide the download
+        # of the files into a number of sub-lists, depending on how many threads
+        # we have
+        n_files = len(file_list)
+        n_threads = int(self.OS_Settings["THREADS"])
+        n_files_per_list =  float(n_files) / n_threads
+
+        # keep tabs on the threads created so we can call join later
+        self.download_threads = []
+
+        for n in range(0, n_threads):
+            start = int(n * n_files_per_list)
+            end = int((n+1) * n_files_per_list + 0.5)
+            if (end > n_files):
+                end = n_files
+            subset_filelist = file_list[start:end]
+            # we now have a subsets of the files for a single thread, create a
+            # process to download each set of files
+            thread = OS_DownloadProcess()
+            self.download_threads.append(thread)
+            # setup the thread with the filelist, bucket_name, target directory
+            # this backend and the thread number
+            thread.setup(subset_filelist,
+                         get_req.migration.external_id,
+                         get_req.pk,
+                         target_dir,
+                         conn.credentials,
+                         self,
+                         n)
+            thread.start()
+
+        for thread in self.download_threads:
+            thread.join()
+
         return len(file_list)
 
     def __get_new_bucket_name(self, conn):
@@ -302,30 +501,87 @@ class ObjectStoreBackend(Backend):
             put_req.migration.external_id = bucket_name
             put_req.migration.save()
 
-        # we have multiple files so upload them one at once
-        for archive_path in file_list:
-            object_name = os.path.relpath(archive_path, prefix)
-            conn.upload_file(archive_path,
-                             put_req.migration.external_id,
-                             object_name)
+        # to take advantage of multiprocesser / threading we divide the upload
+        # of the files into a number of sub-lists, depending on how many threads
+        # we have
+        n_files = len(file_list)
+        n_threads = int(self.OS_Settings["THREADS"])
+        n_files_per_list =  float(n_files) / n_threads
+
+        # keep tabs on the threads created so we can call join later
+        self.upload_threads = []
+
+        for n in range(0, n_threads):
+            start = int(n * n_files_per_list)
+            end = int((n+1) * n_files_per_list + 0.5)
+            if (end > n_files):
+                end = n_files
+            subset_filelist = file_list[start:end]
+            # we now have a subsets of the files for a single thread, create a
+            # process to upload each set of files
+            thread = OS_UploadProcess()
+            self.upload_threads.append(thread)
+            # setup the thread with the filelist, bucket_name, target directory
+            # this backend and the thread number
+            thread.setup(subset_filelist,
+                         put_req.migration.external_id,
+                         put_req.pk,
+                         prefix,
+                         conn.credentials,
+                         self,
+                         n)
+            thread.start()
+
+        for thread in self.upload_threads:
+            thread.join()
+
         return len(file_list)
+
 
     def delete_batch(self, conn, del_req, batch_id):
         """Delete a whole batch from the object store"""
         # we have to delete the bucket and all its contents
         # s3 client only allows for 1000 keys to be returned using the
         # list_object_v2 method.  We use continuation token to continue to
-        # delete all objects in a loop
+        # get the name of all objects in a loop
         kwargs = {'Bucket': batch_id}
         continuation = True
+        # keep tabs on the threads created so we can call join later
+        self.delete_threads = []
+        n_threads = int(self.OS_Settings["THREADS"])
+        current_thread = 0
         while continuation:
+            # check whether we should join any threads
+            if (len(self.delete_threads) >= n_threads):
+                for thread in self.delete_threads:
+                    thread.join()
+                # reset the delete threads
+                self.delete_threads = []
+                current_thread = 0
             # list objects
             response = conn.list_objects_v2(**kwargs)
             # get each object name in turn and delete it
             try:
+                object_list = []
                 for obj in response['Contents']:
                     object_name = obj['Key']
-                    conn.delete_object(Bucket=batch_id, Key=object_name)
+                    object_list.append({'Key' : object_name})
+                # we now have a subses of the files for a single thread, create a
+                # process to delete each set of files
+                thread = OS_DeleteProcess()
+                self.delete_threads.append(thread)
+                # setup the thread with the filelist, bucket_name, target directory
+                # this backend and the thread number
+                delete_dict = {'Objects' : object_list}
+                thread.setup(delete_dict,
+                             del_req.migration.external_id,
+                             del_req.pk,
+                             conn.credentials,
+                             self,
+                             current_thread)
+                current_thread += 1
+                thread.start()
+
             except KeyError:
                 pass
 
@@ -333,6 +589,10 @@ class ObjectStoreBackend(Backend):
                 kwargs['ContinuationToken'] = response['NextContinuationToken']
             except KeyError:
                 continuation = False
+
+        # join any left over threads
+        for thread in self.delete_threads:
+            thread.join()
 
         # delete the bucket
         try:
@@ -424,4 +684,4 @@ class ObjectStoreBackend(Backend):
         """Minimum recommend size for object store = 2GB? (check with Charles,
         Matt Jones, Jonathan Churchill, etc.)
         """
-        return OS_Settings.OBJECT_SIZE
+        return int(self.OS_Settings["OBJECT_SIZE"])
