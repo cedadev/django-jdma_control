@@ -1,0 +1,48 @@
+{
+    "backends" : {
+        "elastictape" : {
+            "ET_QUOTA_URL" : "http://et-monitor.fds.rl.ac.uk/et_user/ET_Holdings_Summary.php",
+            "ET_ROLE_URL"  : "http://et-monitor.fds.rl.ac.uk/et_admin/ET_Role_List.php",
+            "ET_HOLDINGS_URL" : "http://et-monitor.fds.rl.ac.uk/et_user/ET_Holdings_Summary_XML.php",
+            "ET_RETRIEVAL_URL" : "http://et-monitor.fds.rl.ac.uk/et_user/RetrievalWatch.php",
+            "VERIFY_DIR" : "/home/vagrant/JDMA_VERIFY",
+            "ARCHIVE_STAGING_DIR" : "/home/vagrant/JDMA_STAGING",
+
+            "PUT_HOST" : "jasmin_et-ingest.fds.rl.ac.uk",
+            "GET_HOST" : "jasmin_et-retrieval.fds.rl.ac.uk",
+            "PORT" : 7456,
+            "OBJECT_SIZE" : 2147483648,
+            "THREADS" : 2
+        },
+
+        "ftp" : {
+            "VERIFY_DIR" : "/home/vagrant/JDMA_VERIFY",
+            "ARCHIVE_STAGING_DIR" : "/home/vagrant/JDMA_STAGING",
+            "FTP_ENDPOINT" : "192.168.51.21",
+            "OBJECT_SIZE" : 1048576,
+            "THREADS" : 2
+        },
+
+        "objectstore" : {
+            "VERIFY_DIR"  : "/home/vagrant/JDMA_VERIFY",
+            "ARCHIVE_STAGING_DIR" : "/home/vagrant/JDMA_STAGING",
+            "S3_ENDPOINT" : "http://192.168.51.30:9000",
+            "OBJECT_SIZE" : 1048576,
+            "THREADS" : 2
+        }
+    },
+    "processes" : {
+        "jdma_lock" : {
+            "THREADS" : 2
+        },
+        "jdma_pack" : {
+            "THREADS" : 2
+        },
+        "jdma_tidy" : {
+            "THREADS" : 2
+        },
+        "jdma_verify" : {
+            "THREADS" : 2
+        }
+    }
+}

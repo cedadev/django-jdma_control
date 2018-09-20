@@ -21,6 +21,7 @@ import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest, StorageQuota
 from jdma_control.scripts.jdma_lock import setup_logging
 from jdma_control.backends.ConnectionPool import ConnectionPool
+from jdma_control.scripts.common import split_args
 
 connection_pool = ConnectionPool()
 
@@ -143,12 +144,27 @@ def process(backend):
 
 
 def exit_handler(signal, frame):
-    global connection_pool
-    connection_pool.close_all_connections()
     sys.exit(0)
 
 
+def run_loop(backend):
+    try:
+        if backend is None:
+            for backend in jdma_control.backends.get_backends():
+                process(backend)
+        else:
+            if not backend in jdma_control.backends.get_backend_ids():
+                logging.error("Backend: " + backend + " not recognised.")
+            else:
+                backend = jdma_control.backends.get_backend_from_id(backend)
+                process(backend)
+    except (KeyboardInterrupt, SystemExit):
+        connection_pool.close_all_connections()
+        sys.exit(0)
+
+
 def run(*args):
+    global connection_pool
     # monitor the backends for completed GETs and PUTs (to et)
     # have to monitor each backend
     setup_logging(__name__)
@@ -157,16 +173,27 @@ def run(*args):
     signal.signal(signal.SIGHUP, exit_handler)
     signal.signal(signal.SIGTERM, exit_handler)
 
-    # loop this indefinitely until the exit signals are triggered
-    while True:
-        if len(args) == 0:
-            for backend in jdma_control.backends.get_backends():
-                process(backend)
+    # process the arguments
+    arg_dict = split_args(args)
+    if "backend" in arg_dict:
+        backend = arg_dict["backend"]
+    else:
+        backend = None
+
+    # decide whether to run as a daemon
+    if "daemon" in arg_dict:
+        if arg_dict["daemon"].lower() == "true":
+            daemon = True
         else:
-            backend = args[0]
-            if not backend in jdma_control.backends.get_backend_ids():
-                logging.error("Backend: " + backend + " not recognised.")
-            else:
-                backend = jdma_control.backends.get_backend_from_id(backend)
-                process(backend)
-        sleep(5)
+            daemon = False
+    else:
+        daemon = False
+
+    # run as a daemon or one shot
+    if daemon:
+        # loop this indefinitely until the exit signals are triggered
+        while True:
+            run_loop(backend)
+            sleep(5)
+    else:
+        run_loop(backend)

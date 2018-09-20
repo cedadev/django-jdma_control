@@ -25,12 +25,13 @@ from jdma_control.models import StorageQuota
 import jdma_control.backends
 import jdma_control.backends.AES_tools as AES_tools
 from jdma_control.scripts.common import mark_migration_failed, setup_logging
-from jdma_control.scripts.common import calculate_digest
+from jdma_control.scripts.common import calculate_digest, split_args
 from jdma_control.scripts.common import get_archive_set_from_get_request
 from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
 from jdma_control.backends.ConnectionPool import ConnectionPool
 
 connection_pool = ConnectionPool()
+backend_objects = []
 
 def upload(backend_object, credentials, pr):
     # check we actually have some files to archive first
@@ -46,8 +47,8 @@ def upload(backend_object, credentials, pr):
             global connection_pool
             conn = connection_pool.find_or_create_connection(
                 backend_object,
-                pr,
-                credentials,
+                mig_req=pr,
+                credentials=credentials,
                 mode="upload",
                 uid = "PUT"
             )
@@ -165,8 +166,8 @@ def verify(backend_object, credentials, pr):
         global connection_pool
         conn = connection_pool.find_or_create_connection(
             backend_object,
-            pr,
-            credentials,
+            mig_req=pr,
+            credentials=credentials,
             mode="download",
             uid="VERIFY"
         )
@@ -206,7 +207,7 @@ def verify(backend_object, credentials, pr):
             file_list = file_list,
             target_dir = target_dir
         )
-        conn = connection_pool.close_connection(
+        connection_pool.close_connection(
             backend_object,
             pr,
             credentials,
@@ -232,8 +233,8 @@ def download(backend_object, credentials, gr):
         global connection_pool
         conn = connection_pool.find_or_create_connection(
             backend_object,
-            gr,
-            credentials,
+            mig_req=gr,
+            credentials=credentials,
             mode="download",
             uid="GET"
         )
@@ -393,7 +394,7 @@ def restore_owner_and_group(backend_object, gr, conn):
     # of the original from the user query
 
     # start at the last_archive so that interrupted uploads can be resumed
-    st_arch = gr.last_archive
+    st_arch = 0 #gr.last_archive
     n_arch = gr.migration.migrationarchive_set.count()
     archive_set = gr.migration.migrationarchive_set.order_by('pk')
     for arch_num in range(st_arch, n_arch):
@@ -562,8 +563,8 @@ def delete(backend_object, credentials, dr):
     global connection_pool
     conn = connection_pool.find_or_create_connection(
         backend_object,
-        dr,
-        credentials,
+        mig_req=dr,
+        credentials=credentials,
         mode="delete",
         uid="DELETE"
     )
@@ -592,6 +593,7 @@ def delete(backend_object, credentials, dr):
 def delete_transfers(backend_object, key):
     """Work through the state machine to delete batches from the external
     storage"""
+    global shutdown
     # get the storage id for the backend object
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
 
@@ -653,65 +655,96 @@ def delete_transfers(backend_object, key):
         dr.unlock()
     return del_count
 
-
-def process(backend, key):
+def process(backend_object, key):
     """Run the transfer processes on a backend.
     Keep a running total of whether any processes were run.
     If they weren't then put the daemon to sleep for a minute to prevent the
-    database being hammerred"""
-    backend_object = backend()
-
+    database being hammered"""
     n_put = put_transfers(backend_object, key)
     n_get = get_transfers(backend_object, key)
     n_del = delete_transfers(backend_object, key)
     return n_put + n_get + n_del
 
-
-def exit_handler(signal, frame):
-    global connection_pool
-    connection_pool.close_all_connections()
+def shutdown_handler(signum, frame):
     sys.exit(0)
 
 
+def run_loop(backend):
+    # create a list of backend objects to run process on
+    # are we running one backend or many?
+    if backend is None:
+        # all the backends
+        for backend in jdma_control.backends.get_backends():
+            backend_objects.append(backend())
+    else:
+        # one backend
+        if not backend in jdma_control.backends.get_backend_ids():
+            logging.error("Backend: " + backend + " not recognised.")
+        else:
+            backend = jdma_control.backends.get_backend_from_id(backend)
+            backend_objects.append(backend())
+
+    try:
+        # read the decrypt key
+        key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
+        n_procs = 0
+        for backend_object in backend_objects:
+            n_procs += process(backend_object, key)
+
+        # print the number of connections
+        sum_c = 0
+        for c in connection_pool.pool:
+            sum_c += len(connection_pool.pool)
+        # sleep for ten secs if nothing happened in the loop
+        if n_procs == 0:
+            sleep(10)
+    except SystemExit:
+        for backend_object in backend_objects:
+            backend_object.exit()
+        sys.exit(0)
+    except Exception as e:
+        # catch all exceptions as we want this to run in a loop for all
+        # backends and transfers - we don't want one transfer to crash out
+        # the transfer daemon with a single bad transfer!
+        # output the exception to the log so we can see what went wrong
+        logging.error(str(e))
+
+
 def run(*args):
+    global shutdown
     # setup the logging
     setup_logging(__name__)
     # setup exit signal handling
-    signal.signal(signal.SIGINT, exit_handler)
-    signal.signal(signal.SIGHUP, exit_handler)
-    signal.signal(signal.SIGTERM, exit_handler)
     global connection_pool
+    global backend_objects
 
-    # run this indefinitely until the signals are triggered
-    while True:
-        try:
-            # read the decrypt key
-            key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
-            n_procs = 0
-            # run as a daemon
-            if len(args) == 0:
-                for backend in jdma_control.backends.get_backends():
-                    n_procs += process(backend, key)
-            else:
-                backend = args[0]
-                if not backend in jdma_control.backends.get_backend_ids():
-                    logging.error("Backend: " + backend + " not recognised.")
-                else:
-                    backend = jdma_control.backends.get_backend_from_id(backend)
-                    n_procs += process(backend, key)
+    # remap signals to shutdown handler which in turn calls sys.exit(0)
+    # and raises SystemExit exception
+    signal.signal(signal.SIGINT, shutdown_handler)
+    signal.signal(signal.SIGHUP, shutdown_handler)
+    signal.signal(signal.SIGTERM, shutdown_handler)
 
-            # print the number of connections
-            sum_c = 0
-            for c in connection_pool.pool:
-                sum_c += len(connection_pool.pool)
-            # sleep for ten secs if nothing happened in the loop
-            if n_procs == 0:
-                sleep(10)
-        except Exception as e:
-            # catch all exceptions as we want this to run in a loop for all
-            # backends and transfers - we don't want one transfer to crash out
-            # the transfer daemon with a single bad transfer!
-            # output the exception to the log so we can see what went wrong
-            logging.error(str(e))
-        # print ("Number of connections: {}".format(sum_c))
-        #
+    # process the arguments
+    arg_dict = split_args(args)
+    if "backend" in arg_dict:
+        backend = arg_dict["backend"]
+    else:
+        backend = None
+
+    # decide whether to run as a daemon
+    if "daemon" in arg_dict:
+        if arg_dict["daemon"].lower() == "true":
+            daemon = True
+        else:
+            daemon = False
+    else:
+        daemon = False
+
+    # run as a daemon or one shot
+    if daemon:
+        # loop this indefinitely until the exit signals are triggered
+        while True:
+            run_loop(backend)
+            sleep(5)
+    else:
+        run_loop(backend)

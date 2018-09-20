@@ -6,6 +6,9 @@ import os
 import logging
 import shutil
 import subprocess
+import signal,sys
+from time import sleep
+from multiprocessing import Process
 
 from django.db.models import Q
 from django.core.mail import send_mail
@@ -13,8 +16,10 @@ from django.core.mail import send_mail
 from jdma_control.models import Migration, MigrationRequest, StorageQuota
 from jdma_control.scripts.jdma_lock import setup_logging
 from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
+from jdma_control.scripts.common import split_args
 
 import jdma_control.backends
+from jdma_control.scripts.config import read_process_config
 
 def get_batch_info_for_email(backend_object, migration):
     msg = ""
@@ -159,7 +164,11 @@ def remove_archive_files(backend_object, pr):
     # get the directory that the temporary files are in
     batch_id = pr.migration.external_id
     # get the untarring directory
-    archive_dir = get_download_dir(backend_object, pr)
+    if ((pr.request_type == MigrationRequest.PUT) |
+        (pr.request_type == MigrationRequest.MIGRATE)):
+        archive_dir = get_staging_dir(backend_object, pr)
+    else:
+        archive_dir = get_download_dir(backend_object, pr)
     # remove the directory
     if os.path.isdir(archive_dir):
         shutil.rmtree(archive_dir)
@@ -184,12 +193,9 @@ def remove_verification_files(backend_object, pr):
         logging.error("TIDY: cannot find verify directory " + verify_dir)
 
 
-def remove_original_files(backend_object, pr):
-    """Remove the original files.
-    This will occur if request_type == MIGRATE
-    This is the whole point of the migration!"""
-    # loop over the files in the filelist
-    for fd in pr.filelist:
+def remove_original_file_list(filelist):
+    """Remove files given in a file list"""
+    for fd in filelist:
         # check whether it's a directory: walk if it is
         if os.path.isdir(fd):
             # delete the whole directory!
@@ -214,15 +220,64 @@ def remove_original_files(backend_object, pr):
                 ).format(fd, str(e)))
 
 
-def unlock_original_files(backend_object, pr):
+def remove_original_files(backend_object, pr, config):
+    """Remove the original files.
+    This will occur if request_type == MIGRATE
+    This is the whole point of the migration!"""
+    # loop over the files in the filelist
+    filelist = pr.filelist
+    if len(filelist) > 0:
+        n_threads = config["THREADS"]
+        processes = []
+        for tn in range(0, n_threads):
+            local_filelist = filelist[tn::n_threads]
+            p = Process(
+                target = remove_original_file_list,
+                args = (local_filelist,)
+            )
+            p.start()
+            processes.append(p)
+        for p in processes:
+            p.join()
+
+
+def unlock_file_list(file_info_list):
+    """Unlock a list of files.
+    file_list is a list of tuples:
+        (file_path, unix uid, unix gid, unix permissions)
+    """
+    for fi in file_info_list:
+        # skip the file if it doesn't exist but log
+        if not (os.path.exists(fi[0]) or os.path.isdir(fi[0])):
+            logging.error((
+                    "Unlock files: path does not exist {} "
+                ).format(fi[0])
+            )
+            continue
+        # change the owner of the file
+        subprocess.call(
+            ["/usr/bin/sudo",
+             "/bin/chown", "-R",
+             "{}:{}".format(fi[1], fi[2]),
+             fi[0]])
+        # change the permissions of the file
+        subprocess.call(
+            ["/usr/bin/sudo",
+             "/bin/chmod", "-R",
+             "{}".format(fi[3]),
+             fi[0]]
+        )
+
+def unlock_original_files(backend_object, pr, config):
     """Restore the uid:gid and permissions on the original files.
     This will occur if request_type == PUT"""
     # loop over the MigrationArchives that belong to this Migration
     archive_set = pr.migration.migrationarchive_set.order_by('pk')
     # use last_archive to enable restart of unlock
-    st_arch = pr.last_archive
+    st_arch = 0 #pr.last_archive
     n_arch = archive_set.count()
     common_path = pr.migration.common_path
+    file_info_list = []
     for arch_num in range(st_arch, n_arch):
         # determine which archive to stage (tar) and upload
         archive = archive_set[arch_num]
@@ -231,28 +286,28 @@ def unlock_original_files(backend_object, pr):
         for f in files_set:
             # get the full path
             path = os.path.join(pr.migration.common_path, f.path)
-            # skip the file if it doesn't exist but log
-            if not (os.path.exists(path) or os.path.isdir(path)):
-                logging.error((
-                        "Unlock files: path does not exist {} "
-                    ).format(path)
-                )
-                continue
-            # change the owner of the file
-            subprocess.call(
-                ["/usr/bin/sudo",
-                 "/bin/chown", "-R",
-                 "{}:{}".format(f.unix_user_id, f.unix_group_id),
-                 path])
-            # change the permissions of the file
-            subprocess.call(
-                ["/usr/bin/sudo",
-                 "/bin/chmod", "-R",
-                 "{}".format(f.unix_permission),
-                 path]
+            # append to the master file list
+            file_info_list.append((
+                path,
+                f.unix_user_id,
+                f.unix_group_id,
+                f.unix_permission
+            ))
+
+    if len(file_info_list) > 0:
+        n_threads = config["THREADS"]
+        processes = []
+        for tn in range(0, n_threads):
+            local_file_info_list = file_info_list[tn::n_threads]
+            p = Process(
+                target = unlock_file_list,
+                args = (local_file_info_list,)
             )
-        pr.last_archive += 1
-        pr.save()
+            p.start()
+            processes.append(p)
+        for p in processes:
+            p.join()
+
     # unlock the common path
     if common_path != None:
         if not (os.path.exists(common_path) or os.path.isdir(common_path)):
@@ -264,7 +319,7 @@ def unlock_original_files(backend_object, pr):
             # change the owner of the file
             subprocess.call(
                 ["/usr/bin/sudo",
-                 "/bin/chown", "-R",
+                 "/bin/chown",
                  "{}:{}".format(
                     pr.migration.common_path_user_id,
                     pr.migration.common_path_group_id
@@ -273,7 +328,7 @@ def unlock_original_files(backend_object, pr):
             # change the permissions of the file
             subprocess.call(
                 ["/usr/bin/sudo",
-                 "/bin/chmod", "-R",
+                 "/bin/chmod",
                  "{}".format(pr.migration.common_path_permission),
                  common_path]
             )
@@ -317,7 +372,7 @@ def update_storage_quota(backend, migration, update="add"):
     quota.save()
 
 
-def PUT_tidy(backend_object):
+def PUT_tidy(backend_object, config):
     """Do the clean up tasks for a completed PUT or MIGRATE request"""
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # these occur during a PUT or MIGRATE request
@@ -338,10 +393,10 @@ def PUT_tidy(backend_object):
             remove_verification_files(backend_object, pr)
             # only remove the original files for a MIGRATE
             if pr.request_type == MigrationRequest.MIGRATE:
-                remove_original_files(backend_object, pr)
+                remove_original_files(backend_object, pr, config)
             else:
                 # otherwise unlock them (restore uids, gids and permissions)
-                unlock_original_files(backend_object, pr)
+                unlock_original_files(backend_object, pr, config)
             # set to completed and last archive to 0
             # pr will be deleted next time jdma_tidy is invoked
             pr.stage = MigrationRequest.PUT_COMPLETED
@@ -349,13 +404,13 @@ def PUT_tidy(backend_object):
             pr.last_archive = 0
             pr.migration.save()
             # unlock
-            pr.locked = False
-            pr.save()
+            pr.unlock()
         except Exception as e:
+            raise Exception(e)
             logging.error("TIDY: error in PUT_tidy {}".format(str(e)))
 
 
-def GET_tidy(backend_object):
+def GET_tidy(backend_object, config):
     """Do the clean up tasks for a completed GET request"""
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # these occur during a PUT or MIGRATE request
@@ -374,13 +429,12 @@ def GET_tidy(backend_object):
             # update the request to GET_COMPLETED
             gr.stage = MigrationRequest.GET_COMPLETED
             gr.last_archive = 0
-            gr.locked = False
-            gr.save()
+            gr.unlock()
         except Exception as e:
             logging.error("TIDY: error in GET_tidy {}".format(str(e)))
 
 
-def DELETE_tidy(backend_object):
+def DELETE_tidy(backend_object, config):
     """Do the tasks to tidy up a DELETE request:
     Delete the temporary archive files if the associated migration stage
      > PUT_PACKING
@@ -420,7 +474,7 @@ def DELETE_tidy(backend_object):
                     # remove the verification files
                     remove_verification_files(backend_object, pr)
                 if pr.stage < MigrationRequest.PUT_TIDY:
-                    unlock_original_files(backend_object, pr)
+                    unlock_original_files(backend_object, pr, config)
 
             # get the associate GET requests - there could be many or none
             get_reqs = MigrationRequest.objects.filter(
@@ -437,8 +491,7 @@ def DELETE_tidy(backend_object):
             # update the request to DELETE_COMPLETED
             dr.stage = MigrationRequest.DELETE_COMPLETED
             dr.last_archive = 0
-            dr.locked = False
-            dr.save()
+            dr.unlock()
         except Exception as e:
             logging.error("TIDY: error in GET_tidy {}".format(str(e)))
 
@@ -550,7 +603,7 @@ def DELETE_completed(backend_object):
             logging.error("TIDY: error in DELETE_completed {}".format(str(e)))
 
 
-def process(backend):
+def process(backend, config):
     backend_object = backend()
     # run in this order so that MigrationRequests are not deleted immediately
     # which aids debugging!
@@ -558,21 +611,60 @@ def process(backend):
     GET_completed(backend_object)
     DELETE_completed(backend_object)
 
-    PUT_tidy(backend_object)
-    GET_tidy(backend_object)
-    DELETE_tidy(backend_object)
+    PUT_tidy(backend_object, config)
+    GET_tidy(backend_object, config)
+    DELETE_tidy(backend_object, config)
+
+
+def exit_handler(signal, frame):
+    sys.exit(0)
+
+
+def run_loop(backend, config):
+    # moved this to a function so we can call a one-shot version
+    if backend is None:
+        for backend in jdma_control.backends.get_backends():
+            process(backend, config)
+    else:
+        if not backend in jdma_control.backends.get_backend_ids():
+            logging.error("Backend: " + backend + " not recognised.")
+        else:
+            backend = jdma_control.backends.get_backend_from_id(backend)
+            process(backend, config)
 
 
 def run(*args):
     # setup the logging
     setup_logging(__name__)
-    if len(args) == 0:
-        for backend in jdma_control.backends.get_backends():
-            process(backend)
+
+    config = read_process_config("jdma_tidy")
+
+    # setup exit signal handling
+    signal.signal(signal.SIGINT, exit_handler)
+    signal.signal(signal.SIGHUP, exit_handler)
+    signal.signal(signal.SIGTERM, exit_handler)
+
+    # process the arguments
+    arg_dict = split_args(args)
+    if "backend" in arg_dict:
+        backend = arg_dict["backend"]
     else:
-        backend = args[0]
-        if not backend in jdma_control.backends.get_backend_ids():
-            logging.error("Backend: " + backend + " not recognised.")
+        backend = None
+
+    # decide whether to run as a daemon
+    if "daemon" in arg_dict:
+        if arg_dict["daemon"].lower() == "true":
+            daemon = True
         else:
-            backend = jdma_control.backends.get_backend_from_id(backend)
-            process(backend)
+            daemon = False
+    else:
+        daemon = False
+
+    # run as a daemon or one shot
+    if daemon:
+        # loop this indefinitely until the exit signals are triggered
+        while True:
+            run_loop(backend, config)
+            sleep(5)
+    else:
+        run_loop(backend, config)

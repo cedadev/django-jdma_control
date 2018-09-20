@@ -24,14 +24,16 @@ import elastic_tape.shared.error as err
 from elastic_tape.shared.transport import localAddress
 import elastic_tape.client
 from jdma_control.scripts.common import setup_logging
-from jdma_control.backends import ElasticTapeSettings as ET_Settings
 from jdma_control.scripts.common import get_ip_address
+from jdma_control.scripts.config import read_backend_config
+
 processes = []
 
 class TransferProcess(multiprocessing.Process):
-    def setup(self,host,port):
-        self.host = ET_Settings.PUT_HOST
-        self.port = ET_Settings.PORT
+    def setup(self):
+        self.ET_Settings = read_backend_config("elastictape")
+        self.host = self.ET_Settings["PUT_HOST"]
+        self.port = self.ET_Settings["PORT"]
         self.shutdown = multiprocessing.Event()
 
     def run(self):
@@ -39,13 +41,13 @@ class TransferProcess(multiprocessing.Process):
             while not self.shutdown.is_set():
                 transfer = None
                 try:
-                    client = elastic_tape.client.connect( self.host, self.port )
+                    client = elastic_tape.client.connect(self.host, self.port)
                 except err.StorageDError as e:
                     client.close()
                     logging.error(
                         'Caught error {} when trying to connect to ET'.format(e)
                     )
-                    r = random.randint( 5, 15 )
+                    r = random.randint(5, 15)
                     self.shutdown.wait(r)
                 else:
                     try:
@@ -85,7 +87,7 @@ class TransferProcess(multiprocessing.Process):
                     finally:
                         client.close()
                         if transfer is None:
-                            r = random.randint( 5, 15 )
+                            r = random.randint(5, 15)
                             self.shutdown.wait(r)
         except Exception as e:
             logging.exception('Caught this: {}'.format(e))
@@ -95,7 +97,7 @@ class TransferProcess(multiprocessing.Process):
         logging.debug('Shutdown called for process: {}'.format(self.name))
         self.shutdown.set()
 
-def shutdown_handler( signum, frame ):
+def shutdown_handler(signum, frame):
     global processes
     logging.debug('Shutdown called by signal: {}'.format(signum))
     for p in processes:
@@ -124,14 +126,12 @@ def run(*args):
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
-    processes_per_core = ET_Settings.THREADS
-    #  Limit process count
-    max_processes = processes_per_core * multiprocessing.cpu_count()
     # Limit the worker process count
-    transferNum = min(ET_Settings.MAX_TRANSFERS, max_processes)
-    for i in range( transferNum ):
+    ET_Settings = read_backend_config("elastictape")
+    transferNum = ET_Settings["THREADS"]
+    for i in range(transferNum):
         p = TransferProcess()
-        p.setup(ET_Settings.PUT_HOST, ET_Settings.PORT)
+        p.setup()
         processes.append(p)
         p.start()
 
@@ -147,3 +147,6 @@ def run(*args):
         logging.debug('Process shutdown: {}'.format(p.name))
 
     sys.exit(0)
+
+if __name__ == "__main__":
+    run()

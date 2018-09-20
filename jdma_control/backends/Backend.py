@@ -56,6 +56,10 @@ class Backend(object):
 
         logging.basicConfig(filename=log_fname, level=logging.DEBUG)
 
+    def exit(self):
+        """Shutdown the backend."""
+        raise NotImplementedError
+
     def available(self, credentials):
         """Return whether the backend storage is avaliable at the moment
         - i.e. switched on or not!
