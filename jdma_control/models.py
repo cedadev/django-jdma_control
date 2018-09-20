@@ -23,7 +23,8 @@ class User(models.Model):
     name = models.CharField(
         max_length=256,
         unique=True,
-        help_text="Name of user - should be same as JASMIN user name"
+        help_text="Name of user - should be same as JASMIN user name",
+        db_index=True
     )
 
     email = models.EmailField(
@@ -82,7 +83,11 @@ class StorageQuota(models.Model):
         __STORAGE_CHOICES.append((bi, bo.get_id()))
         STORAGE.append(bo.get_id())
         bi += 1
-    storage = models.IntegerField(choices=__STORAGE_CHOICES, default=0)
+    storage = models.IntegerField(
+        choices=__STORAGE_CHOICES,
+        default=0,
+        db_index=True
+    )
 
     quota_size = FileSizeField(
         default=0,
@@ -264,7 +269,7 @@ class MigrationRequest(models.Model):
                     GET : 'GET',
                     MIGRATE : 'MIGRATE',
                     DELETE : 'DELETE'}
-    request_type = models.IntegerField(choices=__REQUEST_CHOICES)
+    request_type = models.IntegerField(choices=__REQUEST_CHOICES, db_index=True)
 
     # new state machine for GET / PUT / MIGRATE
     # all transactions occur through the MigrationRequest, rather than a hybrid
@@ -350,7 +355,8 @@ class MigrationRequest(models.Model):
     stage = models.IntegerField(
         choices=REQ_STAGE_CHOICES,
         default=FAILED,
-        help_text="Current upload / download stage"
+        help_text="Current upload / download stage",
+        db_index=True
     )
 
     # user that the request belongs to

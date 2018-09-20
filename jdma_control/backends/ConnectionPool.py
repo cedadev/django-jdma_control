@@ -33,6 +33,7 @@ class ConnectionPool:
     def find_or_create_connection(self,
                                   backend_object,
                                   mig_req = None,
+                                  req_number = None,
                                   credentials = None,
                                   mode="upload",
                                   thread_number=None,
@@ -47,6 +48,10 @@ class ConnectionPool:
             connection_number = mig_req.pk
             user_name = mig_req.migration.user.name
             workspace = mig_req.migration.workspace.workspace
+        elif req_number is not None:
+            connection_number = req_number
+            user_name = "jdma"
+            workspace = "jdma"
         else:
             connection_number = 0
             user_name = "jdma"
@@ -95,6 +100,7 @@ class ConnectionPool:
     def close_connection(self,
                          backend_object,
                          mig_req = None,
+                         req_number = None,
                          credentials = None,
                          mode="upload",
                          thread_number=None,
@@ -105,6 +111,8 @@ class ConnectionPool:
         backend_id = backend_object.get_id()
         if mig_req is not None:
             connection_number = mig_req.pk
+        elif req_number is not None:
+            connection_number = req_number
         else:
             connection_number = 0
         thread_id = ConnectionPool.__get_connection_id(
@@ -126,5 +134,8 @@ class ConnectionPool:
             backend_object = jdma_control.backends.Backend.get_backend_object(
                 backend_id
             )
-            for mig_id in self.pool[backend_id]:
-                backend_object.close_connection(self.pool[backend_id][mig_id])
+            if settings.TESTING:
+                print("Closing ALL connections for backend {}".format(backend_id))
+            for conn in self.pool[backend_id].values():
+                backend_object.close_connection(conn)
+            self.pool[backend_id] = {}
