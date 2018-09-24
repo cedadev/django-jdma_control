@@ -247,8 +247,6 @@ class FTP_DownloadProcess(multiprocessing.Process):
 
     def exit(self):
         """FTP Download exit handler."""
-        if settings.TESTING:
-            print ("   Exit FTP_DownloadProcess")
         self.backend_object.connection_pool.close_connection(
             self.backend_object,
             req_number = self.req_number,

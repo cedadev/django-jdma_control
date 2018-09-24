@@ -1,19 +1,39 @@
 appdirs==1.4.3
-beautifulsoup4==4.6.0
-html5lib==1.0.1
-Django==2.0.2
-django-extensions==1.9.9
+beautifulsoup4==4.6.3
+boto3==1.9.9
+botocore==1.12.9
+certifi==2018.8.24
+chardet==3.0.4
+circus==0.15.0
+Django==2.1.1
+django-extensions==2.1.2
 django-multiselectfield==0.1.8
 django-sizefield==0.9.1
-packaging==16.8
-psycopg2-binary==2.7.4
-pyparsing==2.2.0
-pytz==2018.3
-six==1.11.0
-feedgen==0.6.1
+docutils==0.14
+elastic-tape==0.1
+feedgen==0.7.0
 feedparser==5.2.1
+html5lib==1.0.1
+idna==2.7
+-e git+https://github.com/cedadev/jasmin-ldap.git@9d62daaeaecca56e320b86f68bee2ad2f745a0ca#egg=jasmin_ldap
+-e git+git@github.com:cedadev/django-jdma_control.git@b72c86ea157f4feea9d8bb2661642a1452776208#egg=jdma_control
+jmespath==0.9.3
+ldap3==2.5.1
+lxml==4.2.5
+mod-wsgi==4.6.4
+packaging==17.1
+protobuf==3.6.1
+psutil==5.4.7
+psycopg2-binary==2.7.5
+pyasn1==0.4.4
 pycryptodome==3.6.6
--e git+https://github.com/cedadev/jasmin-ldap.git@v0.3#egg=jasmin-ldap
--e svn+https://svn.esc.rl.ac.uk/repos/jasmin_et/code/tags/0.3.1.3_Py3.6Specific/elastic_tape#egg=et_tools
-boto3==1.5.30
-requests==2.18.4
+pyparsing==2.2.1
+python-dateutil==2.7.3
+pytz==2018.5
+pyzmq==16.0.4
+requests==2.19.1
+s3transfer==0.1.13
+six==1.11.0
+tornado==4.5.3
+urllib3==1.23
+webencodings==0.5.1
