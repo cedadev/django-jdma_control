@@ -15,7 +15,6 @@ feedparser==5.2.1
 html5lib==1.0.1
 idna==2.7
 -e git+https://github.com/cedadev/jasmin-ldap.git@9d62daaeaecca56e320b86f68bee2ad2f745a0ca#egg=jasmin_ldap
--e git+git@github.com:cedadev/django-jdma_control.git@b72c86ea157f4feea9d8bb2661642a1452776208#egg=jdma_control
 -e svn+https://svn.esc.rl.ac.uk/repos/jasmin_et/code/tags/0.3.1.3_Py3.6Specific/elastic_tape#egg=elastic_tape
 jmespath==0.9.3
 ldap3==2.5.1
