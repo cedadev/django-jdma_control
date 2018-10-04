@@ -649,7 +649,9 @@ class MigrationRequestView(View):
 
                 #   7. check the target path exists
                 base_path = os.path.dirname(target_path)
-                if not os.path.exists(base_path):
+                try:
+                    python_ls(base_path)
+                except:
                     error_data["error"] = (
                         "Parent of target path {}" + target_path + " does not"
                         "exist: {}"
@@ -766,10 +768,11 @@ class MigrationRequestView(View):
                 # 1. check that the path exists
                 # check that each file in the filelist exists or is a directory
                 error = False
+                error_data["error"] = ""
                 for f in data["filelist"]:
-                    error = False
-                    error_data["error"] = ""
-                    if not (os.path.isdir(f) or os.path.isfile(f)):
+                    try:
+                        ls_res = python_ls(f)
+                    except:
                         error_data["error"] += "Path {} does not exist".format(f)
                         error = True
                 if error:
@@ -777,9 +780,9 @@ class MigrationRequestView(View):
 
                 # 2. check that the user has write permissions for each file or
                 # directory in the file list
+                error = False
+                error_data["error"] = ""
                 for f in data["filelist"]:
-                    error = False
-                    error_data["error"] = ""
                     if not user_has_write_permission(f, data["name"]):
                         error_data["error"] += (
                             "User does not have write permission for "
@@ -995,7 +998,8 @@ class MigrationView(View):
         # return details of a single batch
         if "migration_id" in request.GET:
             # get the keywords
-            keyargs = {"pk": int(request.GET.get("migration_id"))}
+            keyargs = {"pk": int(request.GET.get("migration_id")),
+                       "user__name": request.GET.get("name")}
             if "workspace" in request.GET:
                 workspace = request.GET.get("workspace")
                 # get the workspace object
