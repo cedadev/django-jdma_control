@@ -31,7 +31,6 @@ from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_dow
 from jdma_control.backends.ConnectionPool import ConnectionPool
 
 connection_pool = ConnectionPool()
-backend_objects = []
 
 def upload(backend_object, credentials, pr):
     # check we actually have some files to archive first
@@ -669,21 +668,8 @@ def shutdown_handler(signum, frame):
     sys.exit(0)
 
 
-def run_loop(backend):
-    # create a list of backend objects to run process on
-    # are we running one backend or many?
-    if backend is None:
-        # all the backends
-        for backend in jdma_control.backends.get_backends():
-            backend_objects.append(backend())
-    else:
-        # one backend
-        if not backend in jdma_control.backends.get_backend_ids():
-            logging.error("Backend: " + backend + " not recognised.")
-        else:
-            backend = jdma_control.backends.get_backend_from_id(backend)
-            backend_objects.append(backend())
-
+def run_loop(backend_objects):
+    # Run the main loop over and over
     try:
         # read the decrypt key
         key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
@@ -716,7 +702,6 @@ def run(*args):
     setup_logging(__name__)
     # setup exit signal handling
     global connection_pool
-    global backend_objects
 
     # remap signals to shutdown handler which in turn calls sys.exit(0)
     # and raises SystemExit exception
@@ -726,10 +711,22 @@ def run(*args):
 
     # process the arguments
     arg_dict = split_args(args)
+
+    # create a list of backend objects to run process on
+    # are we running one backend or many?
+    backend_objects = []
     if "backend" in arg_dict:
         backend = arg_dict["backend"]
+        # one backend
+        if not backend in jdma_control.backends.get_backend_ids():
+            logging.error("Backend: " + backend + " not recognised.")
+        else:
+            backend_class = jdma_control.backends.get_backend_from_id(backend)
+            backend_objects.append(backend_class())
     else:
-        backend = None
+        # all the backends
+        for backend in jdma_control.backends.get_backends():
+            backend_objects.append(backend())
 
     # decide whether to run as a daemon
     if "daemon" in arg_dict:
@@ -744,7 +741,7 @@ def run(*args):
     if daemon:
         # loop this indefinitely until the exit signals are triggered
         while True:
-            run_loop(backend)
+            run_loop(backend_objects)
             sleep(5)
     else:
-        run_loop(backend)
+        run_loop(backend_objects)
