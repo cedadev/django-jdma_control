@@ -86,8 +86,7 @@ def get_file_info_tuple(filepath):
 
     # get unix group id - just use the raw value and store as integer
     unix_group_id = fstat.st_gid
-    print(filepath, unix_user_id, unix_group_id)
-    
+
     # get the unix permissions
     unix_permission = "{}".format(oct(fstat.st_mode))
     unix_permission = int(unix_permission[-3:])
