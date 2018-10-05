@@ -16,9 +16,6 @@ from time import sleep
 
 from django.db.models import Q
 
-from jasmin_ldap.core import *
-from jasmin_ldap.query import *
-
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest, MigrationArchive
 from jdma_control.models import StorageQuota
@@ -388,7 +385,7 @@ def put_transfers(backend_object, key):
     return put_count
 
 
-def restore_owner_and_group(backend_object, gr, conn):
+def restore_owner_and_group(backend_object, gr):
     # change the owner, group and permissions of the file to match that
     # of the original from the user query
 
@@ -403,49 +400,9 @@ def restore_owner_and_group(backend_object, gr, conn):
         # get the migration files in the archive
         mig_files = archive.migrationfile_set.all()
         for mig_file in mig_files:
-            # query for the user
-            query = Query(
-                conn,
-                base_dn=settings.JDMA_LDAP_BASE_USER
-            ).filter(uid=mig_file.unix_user_id)
-            # check for a valid return
-            if len(query) == 0:
-                error_string = ((
-                    "Unix user id: {} not found from LDAP in monitor_get"
-                ).format(mig_file.unix_user_id))
-                raise Exception(error_string)
-            # use just the first returned result
-            q = query[0]
-            # # check that the keys exist in q
-            try:
-                uidNumber = q["uidNumber"][0]
-            except:
-                error_string = ((
-                    "uidNumber not in returned LDAP query for user id {}"
-                ).format(mig_file.unix_user_id))
-                raise Exception(error_string)
-
-            # query for the group
-            query = Query(
-                conn,
-                base_dn=settings.JDMA_LDAP_BASE_GROUP
-            ).filter(cn=mig_file.unix_group_id)
-            # check for a valid return
-            if len(query) == 0:
-                error_string = ((
-                    "Unix group id: {} not found from LDAP in monitor_get"
-                ).format(mig_file.unix_group_id))
-                raise Exception(error_string)
-            # use just the first returned result
-            q = query[0]
-            # check that the keys exist in q
-            try:
-                gidNumber = q["gidNumber"][0]
-            except:
-                error_string = ((
-                    "gidNumber not in returned LDAP query for group id {}"
-                ).format(mig_file.unix_group_id))
-                raise Exception(error_string)
+            # get the uid and gid
+            uidNumber = mig_file.unix_user_id
+            gidNumber = mig_file.unix_group_id
 
             # form the file path
             file_path = os.path.join(
@@ -490,7 +447,6 @@ def restore_owner_and_group(backend_object, gr, conn):
          gr.target_path]
     )
 
-
     # if we reach this point then the restoration has finished.
     # next stage is tidy up
     gr.stage = MigrationRequest.GET_TIDY
@@ -509,11 +465,6 @@ def get_transfers(backend_object, key):
         Q(request_type=MigrationRequest.GET)
         & Q(migration__storage__storage=storage_id)
     )
-    # create the required ldap server pool, do this just once to
-    # improve performance
-    ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY,
-                              settings.JDMA_LDAP_REPLICAS)
-    ldap_conn = Connection.create(ldap_servers)
 
     # for each GET request get the Migration and determine if the type of the
     # Migration is GET_PENDING
@@ -547,11 +498,10 @@ def get_transfers(backend_object, key):
             # restore the file permissions
             try:
                 get_count += 1
-                restore_owner_and_group(backend_object, gr, ldap_conn)
+                restore_owner_and_group(backend_object, gr)
             except Exception as e:
                 mark_migration_failed(gr, str(e), e, upload_mig=False)
         gr.unlock()
-    ldap_conn.close()
     return get_count
 
 

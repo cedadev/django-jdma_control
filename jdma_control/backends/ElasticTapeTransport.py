@@ -105,7 +105,7 @@ def shutdown_handler(signum, frame):
 
 def run(*args):
 
-    setup_logging(__name__)
+    setup_logging("jdma_control.backends.ElasticTapeTransport")
 
     shutdown = multiprocessing.Event()
     shutdown.clear()
