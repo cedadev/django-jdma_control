@@ -126,7 +126,6 @@ def get_completed_gets(backend_object):
             )
             for file_name in file_name_list:
                 file_path = os.path.join(staging_dir, file_name)
-                print(file_path)
                 try:
                     # just rely on exception thown if file does not exist yet
                     # now check for size

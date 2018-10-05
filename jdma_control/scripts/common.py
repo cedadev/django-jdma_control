@@ -6,7 +6,6 @@ import logging
 import math
 from collections import namedtuple
 
-from jasmin_ldap.query import *
 import jdma_site.settings as settings
 import socket
 
@@ -68,7 +67,7 @@ def setup_logging(module_name):
     logging.basicConfig(filename=log_fname, level=logging.DEBUG)
 
 
-def get_file_info_tuple(filepath, user_name, ldap_conn):
+def get_file_info_tuple(filepath):
     """Get all the info for a file, and return in a tuple.
     Info is: size, SHA-256 digest, unix-uid, unix-gid, unix-permissions, dir?"""
     # get the permissions etc. of the original file
@@ -81,29 +80,14 @@ def get_file_info_tuple(filepath, user_name, ldap_conn):
     else:
         digest = calculate_digest(filepath)
         is_dir = False
-    # get the unix user id owner of the file - use LDAP now
-    # query to find username with uidNumber matching fstat.st_uid - default to
-    # user
-    query = Query(
-        ldap_conn,
-        base_dn=settings.JDMA_LDAP_BASE_USER
-    ).filter(uidNumber=fstat.st_uid)
-    if len(query) == 0 or len(query[0]) == 0:
-        unix_user_id = user_name
-    else:
-        unix_user_id = query[0]["uid"][0]
+    # get the unix user id owner of the file - just use the raw value and store
+    # as integer now
+    unix_user_id = fstat.st_uid
 
-    # query to find group with gidNumber matching fstat.gid - default to users
-    # group
-    query = Query(
-        ldap_conn,
-        base_dn=settings.JDMA_LDAP_BASE_GROUP
-    ).filter(gidNumber=fstat.st_gid)
-    if len(query) == 0 or len(query[0]) == 0:
-        unix_group_id = "users"
-    else:
-        unix_group_id = query[0]["cn"][0]
-
+    # get unix group id - just use the raw value and store as integer
+    unix_group_id = fstat.st_gid
+    print(filepath, unix_user_id, unix_group_id)
+    
     # get the unix permissions
     unix_permission = "{}".format(oct(fstat.st_mode))
     unix_permission = int(unix_permission[-3:])

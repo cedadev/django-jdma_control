@@ -102,7 +102,6 @@ def user_has_write_permission(path, user):
                     "UserHasWritePermission"
                 ).format(user))
                 return False
-
             if ls_res.uid == query[0]["uidNumber"][0]:
                 return True
     return False

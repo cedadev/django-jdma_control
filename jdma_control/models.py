@@ -203,16 +203,14 @@ class Migration(models.Model):
         help_text="Common path prefix for all files in the filelist"
     )
     # gid, uid and file permissions for common_path (cp)
-    common_path_user_id = models.CharField(
+    common_path_user_id = models.IntegerField(
         blank=True,
         null=True,
-        max_length=256,
         help_text="uid of original owner of common_path directory"
     )
-    common_path_group_id = models.CharField(
+    common_path_group_id = models.IntegerField(
         blank=True,
         null=True,
-        max_length=256,
         help_text="gid of original owner of common_path directory"
     )
     common_path_permission = models.IntegerField(
@@ -604,16 +602,14 @@ class MigrationFile(models.Model):
 
     # user id, group id and permissions - record what they are so that they
     # can be restored when the directory is restored
-    unix_user_id = models.CharField(
+    unix_user_id = models.IntegerField(
         blank=True,
         null=True,
-        max_length=256,
         help_text="uid of original owner of file"
     )
-    unix_group_id = models.CharField(
+    unix_group_id = models.IntegerField(
         blank=True,
         null=True,
-        max_length=256,
         help_text="gid of original owner of file"
     )
     unix_permission = models.IntegerField(

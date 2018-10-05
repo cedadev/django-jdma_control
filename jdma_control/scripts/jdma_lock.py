@@ -23,8 +23,6 @@ from django.db.models import Q
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest, StorageQuota
 from jdma_control.models import MigrationArchive, MigrationFile
-from jasmin_ldap.core import *
-from jasmin_ldap.query import *
 import jdma_control.backends
 from jdma_control.backends.Backend import get_backend_object
 
@@ -39,19 +37,11 @@ def joins(path, list_of_paths):
 
 
 def get_info_and_lock_file(user_name, files_dirs_list, q):
-    # create the required ldap server pool, do this just once to
-    # improve performance
-    ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY,
-                              settings.JDMA_LDAP_REPLICAS)
-    ldap_conn = Connection.create(ldap_servers)
-
     file_infos = []
     for file_dir in files_dirs_list:
         # get the info for the file
         file_info = get_file_info_tuple(
             file_dir,
-            user_name,
-            ldap_conn
         )
         # 1. change the owner of the file to be root
         # 2. change the read / write permissions to be user-only
@@ -69,10 +59,9 @@ def get_info_and_lock_file(user_name, files_dirs_list, q):
         ])
         file_infos.append(file_info)
     q.put(file_infos)
-    ldap_conn.close()
 
 
-def lock_put_migration(pr, ldap_conn, config):
+def lock_put_migration(pr, config):
     """Move this to it's own function so that it opens the possibility of
     threading later on
     """
@@ -98,6 +87,15 @@ def lock_put_migration(pr, ldap_conn, config):
         else:
             files_dirs_list.extend(fd)
 
+    # find the common path for the file_infos.filepath
+    pr.migration.common_path = os.path.commonprefix(files_dirs_list)
+    # get the fileinfo for the common path
+    cp_file_info = get_file_info_tuple(pr.migration.common_path)
+
+    pr.migration.common_path_user_id = cp_file_info.unix_user_id
+    pr.migration.common_path_group_id = cp_file_info.unix_group_id
+    pr.migration.common_path_permission = cp_file_info.unix_permission
+
     # now loop over the file list and get the fileinfo - this is
     # parallelised as it involves computing a checksum and changing file
     # permissions so is IO bound
@@ -120,21 +118,6 @@ def lock_put_migration(pr, ldap_conn, config):
     # get the file lists from the queues
     for p in processes:
         file_infos.extend(p[1].get())
-
-    # find the common path for the file_infos.filepath
-    pr.migration.common_path = os.path.commonprefix(
-        [f.filepath for f in file_infos]
-    )
-    # get the fileinfo for the common path
-    cp_file_info = get_file_info_tuple(
-        pr.migration.common_path,
-        pr.migration.user.name,
-        ldap_conn
-    )
-
-    pr.migration.common_path_user_id = cp_file_info.unix_user_id
-    pr.migration.common_path_group_id = cp_file_info.unix_group_id
-    pr.migration.common_path_permission = cp_file_info.unix_permission
 
     # 1. change the owner of the common_path directory to be root
     # 2. change the read / write permissions to be user-only
@@ -255,12 +238,6 @@ def lock_put_migrations(backend_object, config):
        This is to ensure that the user doesn't write any more data to them
        while the external storage write is ongoing.
     """
-    # create the required ldap server pool, do this just once to
-    # improve performance
-    ldap_servers = ServerPool(settings.JDMA_LDAP_PRIMARY,
-                              settings.JDMA_LDAP_REPLICAS)
-    ldap_conn = Connection.create(ldap_servers)
-
     # get the storage id for the backend
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # get the list of PUT requests
@@ -278,9 +255,8 @@ def lock_put_migrations(backend_object, config):
             continue
         # lock the migration in the database
         pr.lock()
-        lock_put_migration(pr, ldap_conn, config)
+        lock_put_migration(pr, config)
         pr.unlock()
-    ldap_conn.close()
 
 
 def lock_get_migration(gr):
