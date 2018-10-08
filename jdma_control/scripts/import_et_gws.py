@@ -4,7 +4,6 @@
 
 import jdma_site.settings as settings
 from jdma_control.models import User, Groupworkspace, StorageQuota
-from jdma_control.scripts.jdma_lock import setup_logging
 from xml.dom.minidom import parseString
 import requests
 
@@ -112,7 +111,5 @@ def get_et_quota_used(url, workspace):
 
 
 def run():
-    # setup_logging(__name__)
-
     data = get_et_gws_from_url(ET_EXPORT_URL)
     create_user_gws_quotas(data)

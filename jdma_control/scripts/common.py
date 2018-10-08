@@ -41,32 +41,6 @@ def calculate_digest(filename):
             sha256.update(data)
     return "{0}".format(sha256.hexdigest())
 
-
-def setup_logging(module_name):
-    # setup the logging
-    try:
-        log_path = settings.LOG_PATH
-    except Exception:
-        log_path = "./"
-
-    # Make the logging dir if it doesn't exist
-    if not os.path.isdir(log_path):
-        os.makedirs(log_path)
-
-    date = datetime.datetime.utcnow()
-    date_string = "%d%02i%02iT%02i%02i%02i" % (
-        date.year,
-        date.month,
-        date.day,
-        date.hour,
-        date.minute,
-        date.second
-    )
-    log_fname = log_path + "/" + module_name + "_" + date_string
-
-    logging.basicConfig(filename=log_fname, level=logging.DEBUG)
-
-
 def get_file_info_tuple(filepath):
     """Get all the info for a file, and return in a tuple.
     Info is: size, SHA-256 digest, unix-uid, unix-gid, unix-permissions, dir?"""

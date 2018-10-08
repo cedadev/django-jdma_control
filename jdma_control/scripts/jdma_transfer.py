@@ -21,7 +21,7 @@ from jdma_control.models import Migration, MigrationRequest, MigrationArchive
 from jdma_control.models import StorageQuota
 import jdma_control.backends
 import jdma_control.backends.AES_tools as AES_tools
-from jdma_control.scripts.common import mark_migration_failed, setup_logging
+from jdma_control.scripts.common import mark_migration_failed
 from jdma_control.scripts.common import calculate_digest, split_args
 from jdma_control.scripts.common import get_archive_set_from_get_request
 from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
@@ -291,6 +291,13 @@ def download(backend_object, credentials, gr):
                 file_list.extend(filt_file_list)
         # Download all if not piecewise
         if not backend_object.piecewise():
+            logging.info((
+                "Downloading files: {} from {} to {}"
+            ).format(
+                file_list,
+                backend_object.get_name(),
+                target_dir
+            ))
             backend_object.download_files(
                 conn,
                 gr,
@@ -430,6 +437,17 @@ def restore_owner_and_group(backend_object, gr):
                      str(mig_file.unix_permission),
                      file_path]
                 )
+                logging.info(
+                    "Changed owner and file permissions for file {}".format(
+                        file_path
+                    )
+                )
+            else:
+                logging.error(
+                    "Could not change owner and permissions on file {}".format(
+                        file_path
+                    )
+                )
     # restore the target_path
     # change the directory owner / group
     subprocess.call(
@@ -542,7 +560,6 @@ def delete(backend_object, credentials, dr):
 def delete_transfers(backend_object, key):
     """Work through the state machine to delete batches from the external
     storage"""
-    global shutdown
     # get the storage id for the backend object
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
 
@@ -615,6 +632,7 @@ def process(backend_object, key):
     return n_put + n_get + n_del
 
 def shutdown_handler(signum, frame):
+    logging.info("Stopping jdma_transfer")
     sys.exit(0)
 
 
@@ -647,11 +665,11 @@ def run_loop(backend_objects):
 
 
 def run(*args):
-    global shutdown
     # setup the logging
-    setup_logging(__name__)
     # setup exit signal handling
     global connection_pool
+
+    logging.info("Starting jdma_transfer")
 
     # remap signals to shutdown handler which in turn calls sys.exit(0)
     # and raises SystemExit exception

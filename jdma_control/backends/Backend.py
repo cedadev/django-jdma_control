@@ -32,30 +32,6 @@ class Backend(object):
     functions should be overloaded, i.e. the class is pure virtual.
     """
 
-    def setup_logging(self, class_name):
-        # setup the logging
-        try:
-            log_path = settings.LOG_PATH
-        except Exception:
-            log_path = "./"
-
-        # Make the logging dir if it doesn't exist
-        if not os.path.isdir(log_path):
-            os.makedirs(log_path)
-
-        date = datetime.datetime.utcnow()
-        date_string = "%d%02i%02iT%02i%02i%02i" % (
-            date.year,
-            date.month,
-            date.day,
-            date.hour,
-            date.minute,
-            date.second
-        )
-        log_fname = log_path + "/" + self.__class__.__name__ + "_" + date_string
-
-        logging.basicConfig(filename=log_fname, level=logging.DEBUG)
-
     def exit(self):
         """Shutdown the backend."""
         raise NotImplementedError
