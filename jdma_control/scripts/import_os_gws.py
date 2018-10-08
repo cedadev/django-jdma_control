@@ -5,7 +5,6 @@
 
 import jdma_site.settings as settings
 from jdma_control.models import User, Groupworkspace, StorageQuota
-from jdma_control.scripts.jdma_lock import setup_logging
 from jdma_control.scripts.import_et_gws import get_et_gws_from_url
 from jdma_control.scripts.import_et_gws import create_user_entry, create_quota_entry
 
@@ -23,6 +22,5 @@ def create_user_gws_quotas(data):
             create_quota_entry(storageid, new_gws, 32 * 10**12, 0)
 
 def run():
-    # setup_logging(__name__)
     data = get_et_gws_from_url(ET_EXPORT_URL)
     create_user_gws_quotas(data)

@@ -23,7 +23,6 @@ import logging
 import elastic_tape.shared.error as err
 from elastic_tape.shared.transport import localAddress
 import elastic_tape.client
-from jdma_control.scripts.common import setup_logging
 from jdma_control.scripts.common import get_ip_address
 from jdma_control.scripts.config import read_backend_config
 
@@ -104,9 +103,6 @@ def shutdown_handler(signum, frame):
         p.stop()
 
 def run(*args):
-
-    setup_logging("jdma_control.backends.ElasticTapeTransport")
-
     shutdown = multiprocessing.Event()
     shutdown.clear()
 

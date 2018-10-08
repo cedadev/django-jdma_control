@@ -19,7 +19,6 @@ from time import sleep
 import jdma_control.backends
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest, StorageQuota
-from jdma_control.scripts.jdma_lock import setup_logging
 from jdma_control.backends.ConnectionPool import ConnectionPool
 from jdma_control.scripts.common import split_args
 
@@ -144,6 +143,7 @@ def process(backend):
 
 
 def exit_handler(signal, frame):
+    logging.info("Stopping jdma_monitor")
     sys.exit(0)
 
 
@@ -165,9 +165,11 @@ def run_loop(backend):
 
 def run(*args):
     global connection_pool
+
+    logging.info("Starting jdma_monitor")
+
     # monitor the backends for completed GETs and PUTs (to et)
     # have to monitor each backend
-    setup_logging(__name__)
     # setup exit signal handling
     signal.signal(signal.SIGINT, exit_handler)
     signal.signal(signal.SIGHUP, exit_handler)

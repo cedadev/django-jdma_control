@@ -352,6 +352,7 @@ def process(backend, config):
 
 
 def exit_handler(signal, frame):
+    logging.info("Stopping jdma_lock")
     sys.exit(0)
 
 
@@ -372,7 +373,8 @@ def run(*args):
     """Entry point for the Django script run via ``./manage.py runscript``
     optionally pass the backend_id in as an argument
     """
-    setup_logging(__name__)
+
+    logging.info("Starting jdma_lock")
 
     config = read_process_config("jdma_lock")
 

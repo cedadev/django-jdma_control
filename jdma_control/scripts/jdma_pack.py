@@ -16,7 +16,7 @@ from django.db.models import Q
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 from jdma_control.models import StorageQuota
-from jdma_control.scripts.jdma_lock import setup_logging, calculate_digest
+from jdma_control.scripts.jdma_lock import calculate_digest
 from jdma_control.scripts.jdma_transfer import mark_migration_failed
 from jdma_control.scripts.jdma_transfer import get_download_dir
 from jdma_control.scripts.common import get_archive_set_from_get_request
@@ -364,6 +364,7 @@ def process(backend, config):
 
 
 def exit_handler(signal, frame):
+    logging.info("Stopping jdma_pack")
     sys.exit(0)
 
 
@@ -384,9 +385,8 @@ def run(*args):
     """Entry point for the Django script run via ``./manage.py runscript``
     optionally pass the backend_id in as an argument
     """
+    logging.info("Starting jdma_pack")
     # setup the logging
-    setup_logging(__name__)
-
     config = read_process_config("jdma_pack")
 
     # setup exit signal handling

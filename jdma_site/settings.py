@@ -127,11 +127,7 @@ ALLOWED_HOSTS=["192.168.51.26",
                "192.168.51.26"]
 
 # App specific settings file for the jdma_control app
-JDMA_LOG_PATH = "/var/log/jdma"
 JDMA_LDAP_BASE_USER = "OU=jasmin,OU=People,O=hpc,DC=rl,DC=ac,DC=uk"
 JDMA_LDAP_BASE_GROUP = "OU=ceda,OU=Groups,O=hpc,DC=rl,DC=ac,DC=uk"
 JDMA_LDAP_PRIMARY = "ldap://homer.esc.rl.ac.uk"
 JDMA_LDAP_REPLICAS = ["ldap://marge.esc.rl.ac.uk", "ldap://wiggum.jc.rl.ac.uk"]
-
-LOG_PATH = "/var/log/jdma"
-

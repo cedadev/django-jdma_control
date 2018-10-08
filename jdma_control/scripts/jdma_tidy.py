@@ -14,7 +14,6 @@ from django.db.models import Q
 from django.core.mail import send_mail
 
 from jdma_control.models import Migration, MigrationRequest, StorageQuota
-from jdma_control.scripts.jdma_lock import setup_logging
 from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
 from jdma_control.scripts.common import split_args
 
@@ -25,13 +24,13 @@ def get_batch_info_for_email(backend_object, migration):
     msg = ""
     msg += "The details of the downloaded batch are:\n"
     msg += (
-        "    Ex. storage\t\t: {}\n"
+        "    Ex. storage\t\t\t: {}\n"
     ).format(str(backend_object.get_id()))
     msg += (
-        "    Batch id\t\t: {}\n"
+        "    Batch id\t\t\t: {}\n"
     ).format(str(migration.pk))
     msg += (
-        "    Workspace\t\t: {}\n"
+        "    Workspace\t\t\t: {}\n"
     ).format(migration.workspace)
     msg += (
         "    Label\t\t\t: {}\n"
@@ -73,8 +72,12 @@ def send_put_notification_email(backend_object, put_req):
     ).format(backend_object.get_name())
 
     msg += (
-        "    Request id\t\t: {}\n"
+        "    Request id\t\t\t: {}\n"
     ).format(put_req.pk)
+
+    msg += "\n"
+    msg += "------------------------------------------------"
+    msg += "\n"
 
     msg += get_batch_info_for_email(backend_object, put_req.migration)
 
@@ -105,7 +108,7 @@ def send_get_notification_email(backend_object, get_req):
         "storage: {}\n"
     ).format(backend_object.get_name())
     msg += (
-        "    Request id\t\t: {}\n"
+        "    Request id\t\t\t: {}\n"
     ).format(str(get_req.pk))
     msg += (
         "    Stage\t\t\t: {}\n"
@@ -114,7 +117,7 @@ def send_get_notification_email(backend_object, get_req):
         "    Date\t\t\t: {}\n"
     ).format(get_req.date.isoformat()[0:16].replace("T"," "))
     msg += (
-        "    Target path\t\t: {}\n"
+        "    Target path\t\t\t: {}\n"
     ).format(get_req.target_path)
     msg += "\n"
     msg += "------------------------------------------------"
@@ -617,6 +620,7 @@ def process(backend, config):
 
 
 def exit_handler(signal, frame):
+    logging.info("Stopping jdma_tidy")
     sys.exit(0)
 
 
@@ -635,7 +639,7 @@ def run_loop(backend, config):
 
 def run(*args):
     # setup the logging
-    setup_logging(__name__)
+    logging.info("Starting jdma_tidy")
 
     config = read_process_config("jdma_tidy")
 

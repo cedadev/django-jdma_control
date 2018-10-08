@@ -18,7 +18,7 @@ from django.db.models import Q
 
 from jdma_control.models import Migration, MigrationRequest
 from jdma_control.models import StorageQuota, MigrationFile
-from jdma_control.scripts.jdma_lock import setup_logging, calculate_digest
+from jdma_control.scripts.jdma_lock import calculate_digest
 from jdma_control.scripts.jdma_transfer import mark_migration_failed
 from jdma_control.scripts.jdma_transfer import get_verify_dir
 import jdma_control.backends
@@ -151,6 +151,7 @@ def verify_files(backend_object, config):
         verify(backend_object, pr, config)
 
 def exit_handler(signal, frame):
+    logging.info("Stopping jdma_verify")
     sys.exit(0)
 
 
@@ -169,7 +170,7 @@ def run_loop(backend, config):
 
 def run(*args):
     # setup the logging
-    setup_logging(__name__)
+    logging.info("Starting jdma_verify")
 
     config = read_process_config("jdma_verify")
 
