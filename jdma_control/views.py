@@ -653,9 +653,8 @@ class MigrationRequestView(View):
                     python_ls(base_path)
                 except:
                     error_data["error"] = (
-                        "Parent of target path {}" + target_path + " does not"
-                        "exist: {}"
-                    ).format(target_path, + str(base_path))
+                        "Parent of target path {} does not exist: {}"
+                    ).format(target_path, str(base_path))
                     return HttpError(error_data, status=403)
 
                 #   8. check the user has permission to write to the directory
