@@ -11,6 +11,7 @@ from django.db.models import Q
 import requests
 from bs4 import BeautifulSoup
 from time import sleep
+import subprocess
 
 from jdma_control.backends.Backend import Backend
 from jdma_control.backends.ConnectionPool import ConnectionPool
@@ -402,6 +403,19 @@ class ElasticTapeBackend(Backend):
                 raise Exception(
                     "Could not download files: {}".format(bad_files)
                 )
+            # elastic tape copies these files to a directory that looks like:
+            # /target_dir/group_workspaces/jasmin4/gws_name/user_name/original_directory
+            # whereas what we want them to look like :
+            # /target_dir/original_directory
+            # This can be acheived by using the original path of the migration
+            # and moving the files from the /target_dir/common_path... to just
+            # the target dir
+            target_dir_cp = os.path.join(get_req.target_path, cp)
+            subprocess.call(["/bin/mv", target_dir_cp + "/*", target_dir])
+            # we now want to delete the empty directories that are left after the move
+            # this is everything beneath /target_dir/first_directory_of_common_path
+            dir_to_remove = os.path.join(target_dir, cp.split("/")[1])
+            subprocess.call(["/bin/rmdir", dir_to_remove])
 
         except Exception as e:
             raise Exception(str(e))
