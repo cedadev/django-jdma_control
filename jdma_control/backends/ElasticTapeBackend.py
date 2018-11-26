@@ -410,12 +410,14 @@ class ElasticTapeBackend(Backend):
             # This can be acheived by using the original path of the migration
             # and moving the files from the /target_dir/common_path... to just
             # the target dir
-            target_dir_cp = os.path.join(get_req.target_path, cp)
+            # we have to trim the first character from the common path (which is
+            # a / to get os.path.join to join the paths correctly)
+            target_dir_cp = os.path.join(get_req.target_path, cp[1:])
             subprocess.call(["/bin/mv", target_dir_cp + "/*", target_dir])
             # we now want to delete the empty directories that are left after the move
             # this is everything beneath /target_dir/first_directory_of_common_path
             dir_to_remove = os.path.join(target_dir, cp.split("/")[1])
-            subprocess.call(["/bin/rmdir", dir_to_remove])
+            subprocess.call(["/bin/rm", "-r", dir_to_remove])
 
         except Exception as e:
             raise Exception(str(e))
