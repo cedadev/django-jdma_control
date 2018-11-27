@@ -386,7 +386,7 @@ class ElasticTapeBackend(Backend):
                 t = handler()
                 t.daemon = True
                 downloadThreads.append(t)
-                t.setup(reqID, get_req.target_path, conn.host, conn.port)
+                t.setup(reqID, target_dir, conn.host, conn.port)
                 t.start()
 
             while not conn.msgIface.checkRRComplete(reqID):
@@ -412,8 +412,11 @@ class ElasticTapeBackend(Backend):
             # the target dir
             # we have to trim the first character from the common path (which is
             # a / to get os.path.join to join the paths correctly)
-            target_dir_cp = os.path.join(get_req.target_path, cp[1:])
-            subprocess.call(["/bin/mv", target_dir_cp + "/*", target_dir])
+            source_dir_cp = os.path.join(target_dir, cp[1:])
+            # get a list of all the files in the source directory
+            for f in os.listdir(source_dir_cp):
+                full_source_path = "{}/{}".format(source_dir_cp, f)
+                subprocess.call(["/bin/mv", full_source_path, target_dir])
             # we now want to delete the empty directories that are left after the move
             # this is everything beneath /target_dir/first_directory_of_common_path
             dir_to_remove = os.path.join(target_dir, cp.split("/")[1])
