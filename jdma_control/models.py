@@ -161,13 +161,16 @@ class Migration(models.Model):
     ON_STORAGE = 2
     FAILED = 3
     DELETING = 4
+    DELETED = 5
 
     STAGE_CHOICES = ((ON_DISK, 'ON_DISK'),
                      (PUTTING, 'PUTTING'),
                      (ON_STORAGE, 'ON_STORAGE'),
                      (FAILED, 'FAILED'),
-                     (DELETING, 'DELETING'))
-    STAGE_LIST = ['ON_DISK', 'PUTTING', 'ON_STORAGE', 'FAILED', 'DELETING']
+                     (DELETING, 'DELETING'),
+                     (DELETED, 'DELETED'))
+    STAGE_LIST = ['ON_DISK', 'PUTTING', 'ON_STORAGE',
+                  'FAILED', 'DELETING', 'DELETED']
     stage = models.IntegerField(choices=STAGE_CHOICES, default=FAILED)
 
     # batch id for external storage

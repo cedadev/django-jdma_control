@@ -2,6 +2,7 @@
 backends."""
 import jdma_control.backends
 import jdma_site.settings as settings
+import logging
 
 class ConnectionPool:
     """A container class to create and access connections to the various
@@ -72,7 +73,7 @@ class ConnectionPool:
                 mode
             )
             if settings.TESTING:
-                print("Creating new connection_id {}".format(connection_id))
+                logging.info("Creating new connection_id {}".format(connection_id))
             conn_dict = {connection_id : conn}
             self.pool[backend_id] = conn_dict
         else:
@@ -80,7 +81,7 @@ class ConnectionPool:
             if connection_id in self.pool[backend_id]:
                 # found
                 if settings.TESTING:
-                    print("Using connection_id {}".format(connection_id))
+                    logging.info("Using connection_id {}".format(connection_id))
                 conn = self.pool[backend_id][connection_id]
             else:
                 # not found, so create and return
@@ -92,7 +93,7 @@ class ConnectionPool:
                     mode
                 )
                 if settings.TESTING:
-                    print("Creating new connection_id {}".format(connection_id))
+                    logging.info("Creating new connection_id {}".format(connection_id))
                 self.pool[backend_id][connection_id] = conn
         return conn
 
@@ -125,7 +126,7 @@ class ConnectionPool:
             backend_object.close_connection(self.pool[backend_id][thread_id])
             self.pool[backend_id].pop(thread_id)
             if settings.TESTING:
-                print("Closing connection {}".format(thread_id))
+                logging.info("Closing connection {}".format(thread_id))
 
 
     def close_all_connections(self):
@@ -135,7 +136,7 @@ class ConnectionPool:
                 backend_id
             )
             if settings.TESTING:
-                print("Closing ALL connections for backend {}".format(backend_id))
+                logging.info("Closing ALL connections for backend {}".format(backend_id))
             for conn in self.pool[backend_id].values():
                 backend_object.close_connection(conn)
             self.pool[backend_id] = {}
