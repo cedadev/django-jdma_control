@@ -23,7 +23,7 @@ from jdma_control.scripts.common import get_archive_set_from_get_request
 from jdma_control.scripts.common import split_args
 import jdma_control.backends
 from jdma_control.scripts.config import read_process_config
-
+from jdma_control.scripts.config import get_logging_format, get_logging_level
 
 def pack_archive(request_staging_dir, archive, pr):
     """Create a tar file containing the files that are in the
@@ -177,6 +177,9 @@ def pack_request(pr, archive_staging_dir, config):
     # the request has completed so transition the request to PUTTING and reset
     # the last archive
     pr.stage = MigrationRequest.PUT_PENDING
+    logging.info((
+        "Transition: request ID: {} PUT_PACKING->PUT_PENDING"
+    ).format(pr.pk))
     pr.last_archive = 0
     pr.save()
 
@@ -318,9 +321,12 @@ def unpack_request(gr, archive_staging_dir, config):
         for p in processes:
             p.join()
 
-    # the request has completed so transition the request to PUTTING and reset
-    # the last archive
+    # the request has completed so transition the request to GET_RESTORE and
+    # reset the last archive
     gr.stage = MigrationRequest.GET_RESTORE
+    logging.info((
+        "Transition: request ID: {} GET_UNPACK->GET_RESTORE"
+    ).format(gr.pk))
     gr.last_archive = 0
     gr.save()
 
@@ -385,9 +391,13 @@ def run(*args):
     """Entry point for the Django script run via ``./manage.py runscript``
     optionally pass the backend_id in as an argument
     """
-    logging.info("Starting jdma_pack")
-    # setup the logging
     config = read_process_config("jdma_pack")
+    logging.basicConfig(
+        format=get_logging_format(),
+        level=get_logging_level(config["LOG_LEVEL"]),
+        datefmt='%Y-%d-%m %I:%M:%S'
+    )
+    logging.info("Starting jdma_pack")
 
     # setup exit signal handling
     signal.signal(signal.SIGINT, exit_handler)

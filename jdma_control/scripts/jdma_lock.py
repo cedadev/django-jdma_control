@@ -28,6 +28,7 @@ from jdma_control.backends.Backend import get_backend_object
 
 from jdma_control.scripts.common import *
 from jdma_control.scripts.config import read_process_config
+from jdma_control.scripts.config import get_logging_format, get_logging_level
 
 def joins(path, list_of_paths):
     return_list = []
@@ -302,10 +303,11 @@ def lock_get_migrations(backend_object):
         gr.unlock()
 
 
-def lock_delete_migration(dr):
+def lock_delete_migration(backend_object, dr):
     # lock this migration request as well
     # find the associated PUT, MIGRATE and GET migration requests and lock
     # them
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     other_reqs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE)
@@ -321,7 +323,7 @@ def lock_delete_migration(dr):
     dr.save()
     logging.info("DELETE: Locked migration: {}".format(dr.migration.pk))
     logging.info((
-        "Transition: request ID: {} GET_START->GET_PENDING"
+        "Transition: request ID: {} DELETE_START->DELETE_PENDING"
     ).format(dr.pk))
 
 
@@ -340,7 +342,7 @@ def lock_delete_migrations(backend_object):
         if dr.locked:
             continue
         dr.lock()
-        lock_delete_migrations(dr)
+        lock_delete_migration(backend_object, dr)
         dr.unlock()
 
 
@@ -373,10 +375,14 @@ def run(*args):
     """Entry point for the Django script run via ``./manage.py runscript``
     optionally pass the backend_id in as an argument
     """
+    config = read_process_config("jdma_lock")
+    logging.basicConfig(
+        format=get_logging_format(),
+        level=get_logging_level(config["LOG_LEVEL"]),
+        datefmt='%Y-%d-%m %I:%M:%S'
+    )
 
     logging.info("Starting jdma_lock")
-
-    config = read_process_config("jdma_lock")
 
     # setup exit signal handling
     signal.signal(signal.SIGINT, exit_handler)

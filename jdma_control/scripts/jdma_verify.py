@@ -16,6 +16,7 @@ from multiprocessing import Process
 
 from django.db.models import Q
 
+import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 from jdma_control.models import StorageQuota, MigrationFile
 from jdma_control.scripts.jdma_lock import calculate_digest
@@ -23,7 +24,9 @@ from jdma_control.scripts.jdma_transfer import mark_migration_failed
 from jdma_control.scripts.jdma_transfer import get_verify_dir
 import jdma_control.backends
 from jdma_control.scripts.config import read_process_config
+from jdma_control.scripts.config import get_logging_format, get_logging_level
 from jdma_control.scripts.common import split_args
+
 
 def get_permissions_string(p):
     # this is unix permissions
@@ -94,7 +97,10 @@ def verify(backend_object, pr, config):
             if archive.packed:
                 stored_digest = archive.digest
             else:
-                file_obj = MigrationFile.objects.get(path=file_path)
+                file_obj = MigrationFile.objects.get(
+                    path=file_path,
+                    archive__migration=pr.migration
+                )
                 stored_digest = file_obj.digest
 
             # add the filename, digest and archive index to the list
@@ -131,8 +137,8 @@ def verify(backend_object, pr, config):
     pr.locked = False
     pr.save()
     logging.info((
-        "Transition: batch ID: {} VERIFYING->PUT_TIDY"
-    ).format(pr.migration.external_id))
+        "Transition: request ID: {} external ID: {} VERIFYING->PUT_TIDY"
+    ).format(pr.pk, pr.migration.external_id))
 
 def verify_files(backend_object, config):
     """Verify the files that have been uploaded to external storage and then
@@ -170,9 +176,13 @@ def run_loop(backend, config):
 
 def run(*args):
     # setup the logging
-    logging.info("Starting jdma_verify")
-
     config = read_process_config("jdma_verify")
+    logging.basicConfig(
+        format=get_logging_format(),
+        level=get_logging_level(config["LOG_LEVEL"]),
+        datefmt='%Y-%d-%m %I:%M:%S'
+    )
+    logging.info("Starting jdma_verify")
 
     # setup exit signal handling
     signal.signal(signal.SIGINT, exit_handler)

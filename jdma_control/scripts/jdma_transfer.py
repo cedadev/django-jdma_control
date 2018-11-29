@@ -25,6 +25,8 @@ from jdma_control.scripts.common import mark_migration_failed
 from jdma_control.scripts.common import calculate_digest, split_args
 from jdma_control.scripts.common import get_archive_set_from_get_request
 from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
+from jdma_control.scripts.config import read_process_config
+from jdma_control.scripts.config import get_logging_format, get_logging_level
 from jdma_control.backends.ConnectionPool import ConnectionPool
 
 connection_pool = ConnectionPool()
@@ -61,8 +63,8 @@ def upload(backend_object, credentials, pr):
             pr.migration.save()
             pr.save()
             logging.info((
-                "Transition: batch ID: {} PUT_PACKING->PUTTING"
-            ).format(pr.migration.external_id))
+                "Transition: request ID: {} external ID: {} PUT_PACKING->PUTTING, ON_DISK->PUTTING"
+            ).format(pr.pk, pr.migration.external_id))
 
             # get the archive set here as it might change if we get it in the loop
             archive_set = pr.migration.migrationarchive_set.order_by('pk')
@@ -171,8 +173,8 @@ def verify(backend_object, credentials, pr):
         pr.stage = MigrationRequest.VERIFY_GETTING
         pr.save()
         logging.info((
-            "Transition: batch ID: {} VERIFY_PENDING->VERIFY_GETTING"
-        ).format(pr.migration.external_id))
+            "Transition: request ID: {} external ID: {} VERIFY_PENDING->VERIFY_GETTING"
+        ).format(pr.pk, pr.migration.external_id))
 
         # get the name of the verification directory
         target_dir = get_verify_dir(backend_object, pr)
@@ -238,8 +240,8 @@ def download(backend_object, credentials, gr):
         gr.stage = MigrationRequest.GETTING
         gr.save()
         logging.info((
-            "Transition: batch ID: {} GET_PENDING->GETTING"
-        ).format(gr.migration.external_id))
+            "Transition: request ID: {} external ID: {} GET_PENDING->GETTING"
+        ).format(gr.pk, gr.migration.external_id))
 
         # we just (potentially) want to get a subset of archives
         archive_set, st_arch, n_arch = get_archive_set_from_get_request(gr)
@@ -467,6 +469,9 @@ def restore_owner_and_group(backend_object, gr):
 
     # if we reach this point then the restoration has finished.
     # next stage is tidy up
+    logging.info((
+        "Transition: request ID: {}: GET_RESTORE->GET_TIDY"
+    ).format(gr.pk))
     gr.stage = MigrationRequest.GET_TIDY
     gr.last_archive = 0
     gr.save()
@@ -538,8 +543,8 @@ def delete(backend_object, credentials, dr):
     try:
         # Transition
         logging.info((
-            "Transition: batch ID: {} DELETE_PENDING->DELETING"
-        ).format(dr.migration.external_id))
+            "Transition: request ID: {} external ID: {} DELETE_PENDING->DELETING"
+        ).format(dr.pk, dr.migration.external_id))
 
         dr.migration.stage = Migration.DELETING
         dr.stage = MigrationRequest.DELETING
@@ -606,8 +611,11 @@ def delete_transfers(backend_object, key):
                 ):
                     delete(backend_object, credentials, dr)
                 else:
-                # transition to DELETE_TIDY if there are no files to delete
+                    # transition to DELETE_TIDY if there are no files to delete
                     dr.stage = MigrationRequest.DELETE_TIDY
+                    logging.info((
+                        "Transition: request ID: {} external_id {}: DELETING->DELETE_TIDY"
+                    ).format(dr.pk))
                     dr.save()
                 del_count += 1
             except Exception as e:
@@ -668,7 +676,12 @@ def run(*args):
     # setup the logging
     # setup exit signal handling
     global connection_pool
-
+    config = read_process_config("jdma_transfer")
+    logging.basicConfig(
+        format=get_logging_format(),
+        level=get_logging_level(config["LOG_LEVEL"]),
+        datefmt='%Y-%d-%m %I:%M:%S'
+    )
     logging.info("Starting jdma_transfer")
 
     # remap signals to shutdown handler which in turn calls sys.exit(0)

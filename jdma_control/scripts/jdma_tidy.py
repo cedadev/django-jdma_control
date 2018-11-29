@@ -8,17 +8,20 @@ import shutil
 import subprocess
 import signal,sys
 from time import sleep
+import datetime
 from multiprocessing import Process
 
 from django.db.models import Q
 from django.core.mail import send_mail
 
+import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest, StorageQuota
 from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
 from jdma_control.scripts.common import split_args
 
 import jdma_control.backends
 from jdma_control.scripts.config import read_process_config
+from jdma_control.scripts.config import get_logging_format, get_logging_level
 
 def get_batch_info_for_email(backend_object, migration):
     msg = ""
@@ -175,9 +178,9 @@ def remove_archive_files(backend_object, pr):
     # remove the directory
     if os.path.isdir(archive_dir):
         shutil.rmtree(archive_dir)
-        logging.info("TIDY: deleting archive directory " + archive_dir)
+        logging.info("Deleting archive directory " + archive_dir)
     else:
-        logging.error("TIDY: cannot find archive directory " + archive_dir)
+        logging.error("Cannot find archive directory " + archive_dir)
 
 
 def remove_verification_files(backend_object, pr):
@@ -191,9 +194,9 @@ def remove_verification_files(backend_object, pr):
     # remove the directory
     if os.path.isdir(verify_dir):
         shutil.rmtree(verify_dir)
-        logging.info("TIDY: deleting verify directory " + verify_dir)
+        logging.info("Deleting verify directory " + verify_dir)
     else:
-        logging.error("TIDY: cannot find verify directory " + verify_dir)
+        logging.error("Cannot find verify directory " + verify_dir)
 
 
 def remove_original_file_list(filelist):
@@ -205,21 +208,21 @@ def remove_original_file_list(filelist):
             try:
                 shutil.rmtree(fd)
                 logging.info((
-                    "TIDY: deleting directory {}"
+                    "Deleting directory {}"
                 ).format(fd))
             except Exception as e:
-                logging.info((
-                    "TIDY: could not delete directory {} : {}"
+                logging.error((
+                    "Could not delete directory {} : {}"
                 ).format(fd, str(e)))
         else:
             try:
                 os.unlink(fd)
                 logging.info((
-                    "TIDY: deleting file {}"
+                    "Deleting file {}"
                 ).format(fd))
             except Exception as e:
-                logging.info((
-                    "TIDY: could not delete file {} : {}"
+                logging.error((
+                    "Could not delete file {} : {}"
                 ).format(fd, str(e)))
 
 
@@ -336,25 +339,6 @@ def unlock_original_files(backend_object, pr, config):
                  common_path]
             )
 
-
-def remove_put_request(pr):
-    """Remove a put request that is PUT_COMPLETED and the associated
-    migration is ON_STORAGE"""
-    logging.info("TIDY: deleting PUT request {}".format(pr.pk))
-    pr.delete()
-
-
-def remove_get_request(gr):
-    """Remove the get requests that are GET_COMPLETED"""
-    logging.info("TIDY: deleting GET request {}".format(gr.pk))
-    gr.delete()
-
-
-def remove_delete_request(dr):
-    """Remove the delete requests that are DELETE_COMPLETED"""
-    logging.info("TIDY: deleting DELETE request {}".format(dr.pk))
-    dr.delete()
-
 def update_storage_quota(backend, migration, update="add"):
     """Update the storage quota for a completed PUT request for this backend.
     """
@@ -403,14 +387,23 @@ def PUT_tidy(backend_object, config):
             # set to completed and last archive to 0
             # pr will be deleted next time jdma_tidy is invoked
             pr.stage = MigrationRequest.PUT_COMPLETED
+            logging.info("Transition: deleting PUT request {}".format(pr.pk))
             pr.migration.stage = Migration.ON_STORAGE
+            logging.info((
+                "Transition: request ID: {} external ID: {}: PUT_TIDY->PUT_COMPLETED, PUTTING->ON_STORAGE"
+            ).format(pr.pk, pr.migration.external_id))
             pr.last_archive = 0
             pr.migration.save()
             # unlock
             pr.unlock()
+            # send a notification email that the puts have completed
+            send_put_notification_email(backend_object, pr)
+            # update the amount of quota the migration has used
+            update_storage_quota(backend_object, pr.migration, update="add")
+
         except Exception as e:
             raise Exception(e)
-            logging.error("TIDY: error in PUT_tidy {}".format(str(e)))
+            logging.error("Error in PUT_tidy {}".format(str(e)))
 
 
 def GET_tidy(backend_object, config):
@@ -431,10 +424,16 @@ def GET_tidy(backend_object, config):
             remove_archive_files(backend_object, gr)
             # update the request to GET_COMPLETED
             gr.stage = MigrationRequest.GET_COMPLETED
-            gr.last_archive = 0
+            logging.info((
+                "Transition: request ID: {} external ID: {}: GET_TIDY->GET_COMPLETED"
+            ).format(gr.pk, gr.migration.external_id))
+            gr.migration.save()
+            gr.save()
             gr.unlock()
+            # send a notification email that the gets have completed
+            send_get_notification_email(backend_object, gr)
         except Exception as e:
-            logging.error("TIDY: error in GET_tidy {}".format(str(e)))
+            logging.error("GET: error in GET_tidy {}".format(str(e)))
 
 
 def DELETE_tidy(backend_object, config):
@@ -470,10 +469,12 @@ def DELETE_tidy(backend_object, config):
             # loop over these requests and act on the stage of that request
             for pr in put_reqs:
                 # switch on the stage of the associate request
-                if pr.stage > MigrationRequest.PUT_PACKING:
+                if (pr.stage > MigrationRequest.PUT_PACKING and
+                    pr.stage < MigrationRequest.PUT_COMPLETED):
                     # remove the temporary staged archive files
                     remove_archive_files(backend_object, pr)
-                if pr.stage > MigrationRequest.VERIFY_PENDING:
+                if (pr.stage > MigrationRequest.VERIFY_PENDING and
+                    pr.stage < MigrationRequest.PUT_COMPLETED):
                     # remove the verification files
                     remove_verification_files(backend_object, pr)
                 if pr.stage < MigrationRequest.PUT_TIDY:
@@ -487,19 +488,29 @@ def DELETE_tidy(backend_object, config):
             )
             # loop over these requests and find those that stage > GET_PENDING
             for gr in get_reqs:
-                if gr.stage > MigrationRequest.GET_PENDING:
+                if (gr.stage > MigrationRequest.GET_PENDING and
+                    gr.stage < MigrationRequest.GET_COMPLETED):
                     # remove the temporary staged archive files
                     remove_archive_files(backend_object, gr)
 
             # update the request to DELETE_COMPLETED
             dr.stage = MigrationRequest.DELETE_COMPLETED
             dr.last_archive = 0
+            # update the migration stage to DELETED
+            dr.migration.stage = Migration.DELETED
+            logging.info((
+                "Transition: request ID: {} external ID: {}: DELETE_TIDY->DELETE_COMPLETED, DELETING->DELETED"
+            ).format(dr.pk, dr.migration.external_id))
+            dr.migration.save()
+            dr.save()
+            # update the quota
+            update_storage_quota(backend_object, dr.migration, update="delete")
             dr.unlock()
         except Exception as e:
-            logging.error("TIDY: error in GET_tidy {}".format(str(e)))
+            logging.error("Error in DELETE_tidy {}".format(str(e)))
 
 
-def PUT_completed(backend_object):
+def PUT_completed(backend_object, config):
     """Do the tasks for a completed PUT request:
         send a notification email
         update the quota
@@ -512,25 +523,22 @@ def PUT_completed(backend_object):
         & Q(migration__storage__storage=storage_id)
         & Q(stage=MigrationRequest.PUT_COMPLETED)
     )
+    now = datetime.datetime.utcnow()
+    num_days = datetime.timedelta(days=config["COMPLETED_REQUEST_DAYS"])
     for pr in put_reqs:
         try:
             # check locked
             if pr.locked:
                 continue
-            pr.lock()
-            # send a notification email that the puts have completed
-            send_put_notification_email(backend_object, pr)
-            # update the amount of quota the migration has used
-            update_storage_quota(backend_object, pr.migration, update="add")
-            # unlock
-            pr.unlock()
-            # delete the request
-            remove_put_request(pr)
+            # remove the request if the requisite time has elapsed
+            if now - pr.date > num_days:
+                logging.info("PUT: deleting PUT request {}".format(pr.pk))
+                pr.delete()
         except Exception as e:
-            logging.error("TIDY: error in PUT_completed {}".format(str(e)))
+            logging.error("PUT: error in PUT_completed {}".format(str(e)))
 
 
-def GET_completed(backend_object):
+def GET_completed(backend_object, config):
     """Do the tasks for a completed GET request:
        send a notification email
        delete the request
@@ -541,22 +549,21 @@ def GET_completed(backend_object):
         & Q(migration__storage__storage=storage_id)
         & Q(stage=MigrationRequest.GET_COMPLETED)
     )
+    now = datetime.datetime.utcnow()
+    num_days = datetime.timedelta(days=config["COMPLETED_REQUEST_DAYS"])
     for gr in get_reqs:
         try:
             if gr.locked:
                 continue
-            # lock
-            gr.lock()
-            # send a notification email that the gets have completed
-            send_get_notification_email(backend_object, gr)
-            # unlock
-            gr.unlock()
-            remove_get_request(gr)
+            # remove the request if the requisite time has elapsed
+            if now - gr.date > num_days:
+                logging.info("GET: deleting GET request {}".format(gr.pk))
+                gr.delete()
         except Exception as e:
-            logging.error("TIDY: error in GET_completed {}".format(str(e)))
+            logging.error("GET: error in GET_completed {}".format(str(e)))
 
 
-def DELETE_completed(backend_object):
+def DELETE_completed(backend_object, config):
     """Do the tasks for a completed DELETE request:
        send a notification email
        delete the request
@@ -570,49 +577,49 @@ def DELETE_completed(backend_object):
         & Q(migration__storage__storage=storage_id)
         & Q(stage=MigrationRequest.DELETE_COMPLETED)
         )
+    now = datetime.datetime.utcnow()
+    num_days = datetime.timedelta(days=config["COMPLETED_REQUEST_DAYS"])
     for dr in del_reqs:
         try:
             if dr.locked:
                 continue
-            dr.lock()
-            # get the associated PUT or MIGRATE requests - there should only be
-            # one
-            other_reqs = MigrationRequest.objects.filter(
-                (Q(request_type=MigrationRequest.PUT)
-                | Q(request_type=MigrationRequest.MIGRATE)
-                | Q(request_type=MigrationRequest.GET))
-                & Q(migration=dr.migration)
-                & Q(migration__storage__storage=storage_id)
-            )
-            for otr in other_reqs:
+            # remove the request if the requisite time has elapsed
+            if now - dr.date > num_days:
+                # get the associated PUT or MIGRATE requests - there should only
+                # be one
+                other_reqs = MigrationRequest.objects.filter(
+                    (Q(request_type=MigrationRequest.PUT)
+                    | Q(request_type=MigrationRequest.MIGRATE)
+                    | Q(request_type=MigrationRequest.GET))
+                    & Q(migration=dr.migration)
+                    & Q(migration__storage__storage=storage_id)
+                )
+
+                for otr in other_reqs:
+                    logging.info((
+                        "DELETE: deleting request {} associated with DELETE request {}."
+                    ).format(otr.pk, dr.pk))
+                    otr.delete()
+
+                logging.info("DELETE: deleting DELETE request {}".format(dr.pk))
+                dr.delete()
+                # delete the migration
                 logging.info((
-                    "TIDY: deleting request {} associated with DELETE request {}."
-                ).format(otr.pk, dr.pk))
-                otr.delete()
-            # update the quota
-            update_storage_quota(backend_object, dr.migration, update="delete")
-            # delete the migration
-            logging.info((
-                "TIDY: deleting migration {} associated with DELETE request {}."
-            ).format(dr.migration.pk, dr.pk))
-            dr.migration.delete()
-            # delete the delete request
-            logging.info((
-                "TIDY: deleting DELETE request {}."
-            ).format(dr.pk))
-            dr.delete()
-            # we are done!
+                    "DELETE: deleting migration {} associated with DELETE request {}."
+                ).format(dr.migration.pk, dr.pk))
+                dr.migration.delete()
+                # we are done!
         except Exception as e:
-            logging.error("TIDY: error in DELETE_completed {}".format(str(e)))
+            logging.error("DELETE: error in DELETE_completed {}".format(str(e)))
 
 
 def process(backend, config):
     backend_object = backend()
     # run in this order so that MigrationRequests are not deleted immediately
     # which aids debugging!
-    PUT_completed(backend_object)
-    GET_completed(backend_object)
-    DELETE_completed(backend_object)
+    PUT_completed(backend_object, config)
+    GET_completed(backend_object, config)
+    DELETE_completed(backend_object, config)
 
     PUT_tidy(backend_object, config)
     GET_tidy(backend_object, config)
@@ -639,9 +646,13 @@ def run_loop(backend, config):
 
 def run(*args):
     # setup the logging
-    logging.info("Starting jdma_tidy")
-
     config = read_process_config("jdma_tidy")
+    logging.basicConfig(
+        format=get_logging_format(),
+        level=get_logging_level(config["LOG_LEVEL"]),
+        datefmt='%Y-%d-%m %I:%M:%S'
+    )
+    logging.info("Starting jdma_tidy")
 
     # setup exit signal handling
     signal.signal(signal.SIGINT, exit_handler)

@@ -2,6 +2,7 @@
 the config for that backend."""
 
 import json
+import logging
 
 def config_path():
     """Return the path of the config file"""
@@ -35,3 +36,21 @@ def read_process_config(process):
             process,
             cfg_path)
         )
+
+def get_logging_level(loglevel):
+    """Convert a logging level string into a logging.LOG_LEVEL"""
+    if loglevel == "DEBUG":
+        return logging.DEBUG
+    elif loglevel == "INFO":
+        return logging.INFO
+    elif loglevel == "WARNING":
+        return logging.WARNING
+    elif loglevel == "ERROR":
+        return logging.ERROR
+    elif loglevel == "CRITICAL":
+        return logging.CRITICAL
+
+def get_logging_format():
+    """return the format string for the logger"""
+    formt = "[%(asctime)s] %(levelname)s:%(message)s"
+    return formt

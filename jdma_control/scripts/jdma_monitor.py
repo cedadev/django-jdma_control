@@ -21,6 +21,8 @@ import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest, StorageQuota
 from jdma_control.backends.ConnectionPool import ConnectionPool
 from jdma_control.scripts.common import split_args
+from jdma_control.scripts.config import read_process_config
+from jdma_control.scripts.config import get_logging_format, get_logging_level
 
 connection_pool = ConnectionPool()
 
@@ -51,8 +53,8 @@ def monitor_put(completed_PUTs, backend_object):
             pr.locked = False
             pr.save()
             logging.info((
-                "Transition: batch ID: {} PUTTING->VERIFY_PENDING"
-            ).format(pr.migration.external_id))
+                "Transition: request ID: {} external ID {} PUTTING->VERIFY_PENDING"
+            ).format(pr.pk, pr.migration.external_id))
 
 
 def monitor_get(completed_GETs, backend_object):
@@ -79,7 +81,7 @@ def monitor_get(completed_GETs, backend_object):
             gr.locked = False
             gr.save()
             logging.info((
-                "Transition: request ID: {} GETTING->ON_DISK"
+                "Transition: request ID: {} GETTING->GET_UNPACKING"
             ).format(gr.pk))
 
 
@@ -100,8 +102,8 @@ def monitor_verify(completed_GETs, backend_object):
             vr.lock()
             vr.stage = MigrationRequest.VERIFYING
             logging.info((
-                "Transition: batch ID: {} VERIFY_GETTING->VERIFYING"
-            ).format(vr.transfer_id))
+                "Transition: request ID: {} external ID: {} VERIFY_GETTING->VERIFYING"
+            ).format(vr.pk, vr.transfer_id))
             # reset the last archive counter
             vr.last_archive = 0
             vr.locked = False
@@ -124,8 +126,8 @@ def monitor_delete(completed_DELETEs, backend_object):
             dr.lock()
             dr.stage = MigrationRequest.DELETE_TIDY
             logging.info((
-                "Transition: batch ID: {} DELETING->DELETE_TIDY"
-            ).format(dr.migration.external_id))
+                "Transition: request ID: {} external ID: {} DELETING->DELETE_TIDY"
+            ).format(dr.pk, dr.migration.external_id))
             # reset the last archive counter
             dr.last_archive = 0
             dr.locked = False
@@ -165,6 +167,13 @@ def run_loop(backend):
 
 def run(*args):
     global connection_pool
+
+    config = read_process_config("jdma_monitor")
+    logging.basicConfig(
+        format=get_logging_format(),
+        level=get_logging_level(config["LOG_LEVEL"]),
+        datefmt='%Y-%d-%m %I:%M:%S'
+    )
 
     logging.info("Starting jdma_monitor")
 

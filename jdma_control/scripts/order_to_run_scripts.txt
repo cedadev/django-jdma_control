@@ -40,6 +40,8 @@ Migrations now have only four states:
                  storage and deleted from the original storage)
 3. FAILED       (something went wrong - record the failure reason in the
                  Migration request)
+4. DELETING     (the migration is currently being deleted)
+5. DELETED      (the migration has been deleted)
 
 MigrationRequests now have many more states and handle all states of the data
 transfer.  One task per operation.
@@ -76,7 +78,7 @@ For DELETE requests
 22. FAILED
 
 There now follows a description of which operations are carried out when the
-machine is in a particular start, which of the daemons carries out these
+machine is in a particular state, which of the daemons carries out these
 operations and the transition to the next stage in the state machine.
 last_archive is used to keep track of which archive is being acted upon so
 that if the script is interrupted it can be resumed from the last_archive.
