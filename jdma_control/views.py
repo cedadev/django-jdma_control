@@ -398,7 +398,7 @@ class MigrationRequestView(View):
             data = {"request_id": req.id, "user": req.user.name,
                     "request_type": req.request_type,
                     "migration_id": req.migration.pk,
-                    "migration_label": req.migration.label,
+                    "label": req.migration.label,
                     "workspace": req.migration.workspace.workspace,
                     "storage": StorageQuota.get_storage_name(
                         req.migration.storage.storage
@@ -430,7 +430,7 @@ class MigrationRequestView(View):
                 req_data = {"request_id": r.pk, "user": r.user.name,
                             "request_type": r.request_type,
                             "migration_id": r.migration.pk,
-                            "migration_label": r.migration.label,
+                            "label": r.migration.label,
                             "workspace": r.migration.workspace.workspace,
                             "storage": StorageQuota.get_storage_name(
                                 r.migration.storage.storage
@@ -517,7 +517,7 @@ class MigrationRequestView(View):
 
         if "name" not in data:
             error_data["error"] = "No name supplied"
-            return HttpError(error_data, status=500)
+            return HttpError(error_data)
 
         # check name exists as a user
         try:
@@ -606,7 +606,7 @@ class MigrationRequestView(View):
                     error_data["error"] = (
                         "User {} does not have permission to request batch {}"
                     ).format(user.name, data["migration_id"])
-                    return HttpError(error_data)
+                    return HttpError(error_data, status=403)
 
                 #   4. check that the stage is ON_STORAGE
                 if migration.stage != Migration.ON_STORAGE:
@@ -615,7 +615,7 @@ class MigrationRequestView(View):
                         "Batch stage is: {}.  Cannot retrieve (GET) until"
                         " stage is ON_STORAGE"
                     ).format(mig_stage)
-                    return HttpError(error_data)
+                    return HttpError(error_data, status=403)
 
                 # We don't need to create a migration as we're operating on an
                 # existing one - assign it
@@ -655,7 +655,7 @@ class MigrationRequestView(View):
                     error_data["error"] = (
                         "Parent of target path {} does not exist: {}"
                     ).format(target_path, str(base_path))
-                    return HttpError(error_data, status=403)
+                    return HttpError(error_data, status=404)
 
                 #   8. check the user has permission to write to the directory
                 if not user_has_write_permission(base_path, data["name"]):
@@ -697,7 +697,6 @@ class MigrationRequestView(View):
                 return_data["filelist"] = migration_request.filelist
 
                 # build the return data - just target path is uncommon
-                return_data = data
                 return_data["target_path"] = target_path
 
             except Exception as e:
@@ -738,7 +737,7 @@ class MigrationRequestView(View):
                     error_data["error"] = (
                         "Filelist or directory {}... is already in a migration"
                     ).format(data["filelist"][0])
-                    return HttpError(error_data)
+                    return HttpError(error_data, status=403)
 
                 # check for the label in the request - if not then derive from
                 # filelist
@@ -789,7 +788,7 @@ class MigrationRequestView(View):
                         ).format(f)
                         error = True
                 if error:
-                    return HttpError(error_data)
+                    return HttpError(error_data, status=403)
 
                 # 3, 3a, 3b check the backend
                 JDMA_BACKEND_OBJECT = \
@@ -933,7 +932,7 @@ class MigrationRequestView(View):
                     error_data["error"] = (
                         "User {} does not have permission to delete batch: {}"
                     ).format(user.name, data["migration_id"])
-                    return HttpError(error_data)
+                    return HttpError(error_data, status=403)
 
                 # We don't need to create a migration as we're deleting an
                 # existing one - assign it
@@ -1129,10 +1128,10 @@ class MigrationView(View):
         if username != migration.user.name:
             error_data = {
                 "error": "User " + username + " cannot edit this batch as they do not own it!",
-                "request_id": mig_id,
+                "migration_id": mig_id,
                 "name": username
             }
-            return HttpError(error_data)
+            return HttpError(error_data, status=403)
 
         # otherwise modify it
         if "label" in data:
@@ -1140,7 +1139,7 @@ class MigrationView(View):
 
         migration.save()
 
-        return HttpResponse(json.dumps({"none": "none"}),
+        return HttpResponse(json.dumps(data),
                             content_type="application/json")
 
 class MigrationFileView(View):

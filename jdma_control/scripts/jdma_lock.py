@@ -63,8 +63,7 @@ def get_info_and_lock_file(user_name, files_dirs_list, q):
 
 
 def lock_put_migration(pr, config):
-    """Move this to it's own function so that it opens the possibility of
-    threading later on
+    """Move this to it's own function so that it can be used in threading.
     """
     # loop over the files or directories - copy full paths for the files and
     # directories into a list
