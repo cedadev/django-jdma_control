@@ -94,6 +94,7 @@ tasks:
     create the MigrationArchives
     assign the MigrationFiles to the MigrationArchives bases on size so that no
     MigrationArchive size is less than the backends minimum object size
+    calculate the digests of the MigrationArchives
 transition:
     PUT_START->PUT_PACKING
     ON_DISK->PUTTING
@@ -105,7 +106,6 @@ tasks:
     create the staging directory
     create the tarfile MigrationArchives in the staging directory and add the
       MigrationFiles to the MigrationArchives
-    calculate the digests of the MigrationArchives
     set last_archive to 0
 transition:
     PUT_PACKING->PUT_PENDING

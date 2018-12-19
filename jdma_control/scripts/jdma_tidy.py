@@ -613,6 +613,28 @@ def DELETE_completed(backend_object, config):
             logging.error("DELETE: error in DELETE_completed {}".format(str(e)))
 
 
+def FAILED_completed(backend_object, config):
+    """Do the tasks for a FAILED request:
+       unlock the original files
+    """
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    # these occur during a PUT or MIGRATE request
+    fail_reqs = MigrationRequest.objects.filter(
+       	Q(request_type=MigrationRequest.PUT)
+        | Q(stage=MigrationRequest.FAILED)
+        & Q(migration__storage__storage=storage_id)
+	)
+    for fr in fail_reqs:
+        try:
+            # we want to use the locked FAILED requests to restore the original
+            # permissions on the files
+            if fr.locked:
+                unlock_original_files(backend_object, fr, config)
+                fr.unlock()
+        except Exception as e:
+            logging.error("FAILED: error in FAILED_completed {}".format(str(e)))
+
+
 def process(backend, config):
     backend_object = backend()
     # run in this order so that MigrationRequests are not deleted immediately
@@ -624,6 +646,8 @@ def process(backend, config):
     PUT_tidy(backend_object, config)
     GET_tidy(backend_object, config)
     DELETE_tidy(backend_object, config)
+
+    FAILED_completed(backend_object, config)
 
 
 def exit_handler(signal, frame):

@@ -33,16 +33,29 @@
     },
     "processes" : {
         "jdma_lock" : {
-            "THREADS" : 2
+            "THREADS" : 2,
+            "LOG_LEVEL" : "INFO"
+        },
+        "jdma_monitor" : {
+            "THREADS" : 1,
+            "LOG_LEVEL" : "INFO"
         },
         "jdma_pack" : {
-            "THREADS" : 2
+            "THREADS" : 2,
+            "LOG_LEVEL" : "INFO"
         },
         "jdma_tidy" : {
-            "THREADS" : 2
+            "THREADS" : 2,
+            "COMPLETED_REQUEST_DAYS" : 1,
+            "LOG_LEVEL" : "INFO"
         },
         "jdma_verify" : {
-            "THREADS" : 2
+            "THREADS" : 2,
+            "LOG_LEVEL" : "INFO"
+        },
+        "jdma_transfer" : {
+            "THREADS" : 2,
+            "LOG_LEVEL" : "INFO"
         }
     }
 }
