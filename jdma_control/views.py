@@ -417,7 +417,7 @@ class MigrationRequestView(View):
             # return details of all the migration requests for this user
             keyargs = {"user__name": request.GET.get("name")}
             try:
-                reqs = MigrationRequest.objects.filter(**keyargs)
+                reqs = MigrationRequest.objects.filter(**keyargs).order_by('pk')
             except Exception:
                 # return error as easily interpreted JSON
                 error_data = {"error": "Request not found.",
@@ -1058,7 +1058,7 @@ class MigrationView(View):
             if "workspace" in request.GET:
                 workspace = request.GET.get("workspace")
                 # get the workspace object
-                gws = Groupworkspace.objects.filter(workspace=workspace)
+                gws = Groupworkspace.objects.filter(workspace=workspace).order_by('pk')
                 if len(gws) == 0:
                     error_data = {"error": "Workspace not found.",
                                   "name": keyargs["user__name"]}
