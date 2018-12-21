@@ -26,7 +26,7 @@
         "objectstore" : {
             "VERIFY_DIR"  : "/home/vagrant/JDMA_VERIFY",
             "ARCHIVE_STAGING_DIR" : "/home/vagrant/JDMA_STAGING",
-            "S3_ENDPOINT" : "http://192.168.51.30:9000",
+            "S3_ENDPOINT" : "http://130.246.129.81:9000",
             "OBJECT_SIZE" : 1048576,
             "THREADS" : 2
         }
