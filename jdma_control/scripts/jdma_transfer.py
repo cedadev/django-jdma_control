@@ -606,6 +606,7 @@ def delete_transfers(backend_object, key):
         if dr.stage == MigrationRequest.DELETE_PENDING:
             try:
                 # only try to do the delete if some files have been uploaded!
+                # and the external id is not None
                 if ((put_req and put_req.stage > MigrationRequest.PUT_PACKING and
                      dr.migration.external_id is not None)
                    or (dr.migration.stage == Migration.ON_STORAGE)
@@ -616,7 +617,7 @@ def delete_transfers(backend_object, key):
                     dr.stage = MigrationRequest.DELETE_TIDY
                     logging.info((
                         "Transition: request ID: {}: DELETING->DELETE_TIDY"
-                    ).format(dr.pk))
+                    ).format(dr.pk, dr.migration.external_id))
                     dr.save()
                 del_count += 1
             except Exception as e:

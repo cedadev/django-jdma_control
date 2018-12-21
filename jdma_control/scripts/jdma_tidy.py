@@ -505,6 +505,7 @@ def DELETE_tidy(backend_object, config):
             dr.save()
             # update the quota
             update_storage_quota(backend_object, dr.migration, update="delete")
+            send_delete_notification_email(backend_object, dr)
             dr.unlock()
         except Exception as e:
             logging.error("Error in DELETE_tidy {}".format(str(e)))
