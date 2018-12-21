@@ -623,7 +623,7 @@ class MigrationRequestView(View):
 
                 #   5. check the user has permission to write to the target directory
                 # get the target dir
-                if "target_path" in data:
+                if "target_path" in data and data["target_path"] != None:
                     target_path = data["target_path"]
                 else:
                     error_data["error"] = "Target path not supplied"
@@ -683,6 +683,20 @@ class MigrationRequestView(View):
                     migration_request.filelist = [
                         f.replace(migration.common_path, "")[1:] for f in filelist
                     ]
+                    # get the number of archives that contain the files
+                    # if this is zero then return an error
+                    archive_count = MigrationArchive.objects.filter(
+                        migration=migration,
+                        migrationfile__path__in=migration_request.filelist
+                    ).count()
+                    # raise an error if 0
+                    if archive_count == 0:
+                        error_data["error"] = (
+                            ("Requested file list contains zero files that "
+                             "belong to batch {}")
+                        ).format(migration.pk)
+                        return HttpError(error_data, status=404)
+
                 migration_request.target_path = target_path
                 migration_request.stage = MigrationRequest.GET_START
                 # credentials - we encrypt these using AES EAX mode

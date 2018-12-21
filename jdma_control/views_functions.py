@@ -65,12 +65,12 @@ def user_has_write_permission(path, user):
     ls_res = python_ls(path)
 
     # check for all
-    if "wx" in ls_res.mode[2]:
+    if "wx" in ls_res.mode[2] or "ws" in ls_res.mode[2]:
         return True
 
     # check for group
     with Connection.create(ldap_servers) as conn:
-        if "wx" in ls_res.mode[1]:
+        if "wx" in ls_res.mode[1] or "ws" in ls_res.mode[1]:
             # now we need to check that user is part of the group that owns
             # the file at path
             group = ls_res.gid
@@ -89,7 +89,7 @@ def user_has_write_permission(path, user):
             if len(query) != 0 and user in query[0]['memberUid']:
                 return True
         # check for user
-        if "wx" in ls_res.mode[0]:
+        if "wx" in ls_res.mode[0] or "ws" in ls_res.mode[0]:
             # check that the owner of the file matches the user
             # get the uid of the user
             query = Query(
