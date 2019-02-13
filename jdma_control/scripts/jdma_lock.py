@@ -41,23 +41,28 @@ def get_info_and_lock_file(user_name, files_dirs_list, q):
     file_infos = []
     for file_dir in files_dirs_list:
         # get the info for the file
-        file_info = get_file_info_tuple(
-            file_dir,
-        )
-        # 1. change the owner of the file to be root
-        # 2. change the read / write permissions to be user-only
-        subprocess.call([
-            "/usr/bin/sudo",
-            "/bin/chown",
-            "root:root",
-            file_dir
-        ])
-        subprocess.call([
-            "/usr/bin/sudo",
-            "/bin/chmod",
-            "700",
-            file_dir
-        ])
+        # try to do this, it might fail if the file is not found (i.e. bad link)
+        try:
+            file_info = get_file_info_tuple(file_dir)
+        except FileNotFoundError:
+            # don't log in threads as it'll cause Quobyte to lock
+            # instead create a FileInfo named tuple with some sentinel values
+            file_info = FileInfo(file_dir, -1, -1, -1, -1, -1, False)
+        else:
+            # 1. change the owner of the file to be root
+            # 2. change the read / write permissions to be user-only
+            subprocess.call([
+                "/usr/bin/sudo",
+                "/bin/chown",
+                "root:root",
+                file_dir
+            ])
+            subprocess.call([
+                "/usr/bin/sudo",
+                "/bin/chmod",
+                "700",
+                file_dir
+            ])
         file_infos.append(file_info)
     q.put(file_infos)
 
@@ -114,10 +119,9 @@ def lock_put_migration(pr, config):
 
     # block here until all threads have completed
     for p in processes:
-        p[0].join()
-    # get the file lists from the queues
-    for p in processes:
+        # get the file lists from the queues
         file_infos.extend(p[1].get())
+        p[0].join()
 
     # 1. change the owner of the common_path directory to be root
     # 2. change the read / write permissions to be user-only
@@ -172,6 +176,14 @@ def lock_put_migration(pr, config):
             # n_current_file
             mig_file = MigrationFile()
             fileinfo = file_infos[n_current_file]
+            # some fileinfos may have -1 as the size, as they are not found
+            # we don't want to add these to the migrations
+            if fileinfo.size == -1:
+                logging.info("PUT: Skipping file: {} as it is not found".format(
+                                mig_file.path))
+                n_current_file -= 1 # still have to iterate
+                continue
+
             # add the size to the current archive size
             current_size += fileinfo.size
             # fill in the details

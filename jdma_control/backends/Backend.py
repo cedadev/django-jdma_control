@@ -233,3 +233,7 @@ class Backend(object):
         """
         # in bytes - assume this is filesystem, so "optimum" is 32MB
         return 32 * 10**6
+
+    def maximum_object_count(self):
+        """Maximum number of objects in an archive"""
+        return 2500

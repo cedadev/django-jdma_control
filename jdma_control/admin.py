@@ -112,10 +112,12 @@ class MigrationFileInline(admin.TabularInline):
 class MigrationArchiveAdmin(admin.ModelAdmin):
     save_on_top = True
     list_display = ('pk', 'migration', 'formatted_size', 'digest')
-    fields = ('link_to_migration', 'formatted_size', 'digest', 'packed')
-    readonly_fields = ('link_to_migration', 'formatted_size', 'digest', 'packed')
+    fields = ('link_to_migration', 'formatted_size', 'digest', 'packed',
+              'get_filtered_file_names_string')
+    readonly_fields = ('link_to_migration', 'formatted_size', 'digest',
+                       'packed', 'get_filtered_file_names_string')
     search_fields = ('migration.workspace',)
-    inlines = [MigrationFileInline]
+    #inlines = [MigrationFileInline]
 
     def link_to_migration(self, obj):
         link = reverse('admin:jdma_control_migration_change',

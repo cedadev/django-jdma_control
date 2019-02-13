@@ -35,7 +35,7 @@ def get_permissions_string(p):
     perm = oct(p)[-3:]
     return is_dir + ''.join(dic.get(x,x) for x in perm)
 
-def verify_list_of_files(list_of_files):
+def verify_list_of_files(list_of_files, pr):
     """Verify a list of files by recalculating the digest.
     list_of_files is a list of tuples (file_path, digest)
     where digest has been calculated previously"""
@@ -118,7 +118,7 @@ def verify(backend_object, pr, config):
             local_list = file_and_digest_list[tn::n_threads]
             p = Process(
                 target = verify_list_of_files,
-                args = (local_list, )
+                args = (local_list, pr)
             )
             p.start()
             processes.append(p)
@@ -127,18 +127,19 @@ def verify(backend_object, pr, config):
         for p in processes:
             p.join()
 
-    # if we reach this part without exiting then the batch has verified
+    # if we reach this part without FAILING then the batch has verified
     # successfully and we can transition to PUT_TIDY, ready for the
     # tidy up process
-    pr.stage = MigrationRequest.PUT_TIDY
-    # reset last archive
-    pr.last_archive = 0
-    # unlock
-    pr.locked = False
-    pr.save()
-    logging.info((
-        "Transition: request ID: {} external ID: {} VERIFYING->PUT_TIDY"
-    ).format(pr.pk, pr.migration.external_id))
+    if pr.stage != MigrationRequest.FAILED:
+        pr.stage = MigrationRequest.PUT_TIDY
+        # reset last archive
+        pr.last_archive = 0
+        # unlock
+        pr.locked = False
+        pr.save()
+        logging.info((
+            "Transition: request ID: {} external ID: {} VERIFYING->PUT_TIDY"
+        ).format(pr.pk, pr.migration.external_id))
 
 def verify_files(backend_object, config):
     """Verify the files that have been uploaded to external storage and then

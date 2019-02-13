@@ -135,7 +135,7 @@ def send_delete_notification_email(backend_object, del_req):
     """Send an email to the user to notify them that their batch has been
     succssfully deleted.
     """
-    user = put_req.user
+    user = del_req.user
 
     if not user.notify:
         return
@@ -505,7 +505,7 @@ def DELETE_tidy(backend_object, config):
             dr.save()
             # update the quota
             update_storage_quota(backend_object, dr.migration, update="delete")
-            send_delete_notification_email(backend_object, dr)
+            send_delete_notification_email(backend_object, gr)
             dr.unlock()
         except Exception as e:
             logging.error("Error in DELETE_tidy {}".format(str(e)))
@@ -532,7 +532,7 @@ def PUT_completed(backend_object, config):
             if pr.locked:
                 continue
             # remove the request if the requisite time has elapsed
-            if now - pr.date > num_days:
+            if (now - pr.date).days > num_days.days:
                 logging.info("PUT: deleting PUT request {}".format(pr.pk))
                 pr.delete()
         except Exception as e:
@@ -557,7 +557,7 @@ def GET_completed(backend_object, config):
             if gr.locked:
                 continue
             # remove the request if the requisite time has elapsed
-            if now - gr.date > num_days:
+            if (now - gr.date).days > num_days.days:
                 logging.info("GET: deleting GET request {}".format(gr.pk))
                 gr.delete()
         except Exception as e:
@@ -585,7 +585,7 @@ def DELETE_completed(backend_object, config):
             if dr.locked:
                 continue
             # remove the request if the requisite time has elapsed
-            if now - dr.date > num_days:
+            if (now - dr.date).days > num_days.days:
                 # get the associated PUT or MIGRATE requests - there should only
                 # be one
                 other_reqs = MigrationRequest.objects.filter(
@@ -621,8 +621,9 @@ def FAILED_completed(backend_object, config):
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # these occur during a PUT or MIGRATE request
     fail_reqs = MigrationRequest.objects.filter(
-       	Q(request_type=MigrationRequest.PUT)
-        | Q(stage=MigrationRequest.FAILED)
+       	(Q(request_type=MigrationRequest.PUT)
+        | Q(request_type=MigrationRequest.MIGRATE))
+        & Q(stage=MigrationRequest.FAILED)
         & Q(migration__storage__storage=storage_id)
 	)
     for fr in fail_reqs:

@@ -616,7 +616,7 @@ def delete_transfers(backend_object, key):
                     # transition to DELETE_TIDY if there are no files to delete
                     dr.stage = MigrationRequest.DELETE_TIDY
                     logging.info((
-                        "Transition: request ID: {}: DELETING->DELETE_TIDY"
+                        "Transition: request ID: {} external_id {}: DELETING->DELETE_TIDY"
                     ).format(dr.pk, dr.migration.external_id))
                     dr.save()
                 del_count += 1

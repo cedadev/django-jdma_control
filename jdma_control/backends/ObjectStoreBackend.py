@@ -38,7 +38,8 @@ def get_completed_puts(backend_object):
     completed_PUTs = []
     # now loop over the PUT requests
     put_reqs = MigrationRequest.objects.filter(
-        (Q(request_type=MigrationRequest.PUT))
+        (Q(request_type=MigrationRequest.PUT)
+        | Q(request_type=MigrationRequest.MIGRATE))
         & Q(stage=MigrationRequest.PUTTING)
         & Q(migration__stage=Migration.PUTTING)
         & Q(migration__storage__storage=storage_id)
@@ -684,3 +685,7 @@ class ObjectStoreBackend(Backend):
         Matt Jones, Jonathan Churchill, etc.)
         """
         return int(self.OS_Settings["OBJECT_SIZE"])
+
+    def maximum_object_count(self):
+        """Maximum number of objects in an archive"""
+        return (int(self.OS_Settings["OBJECT_COUNT"]))

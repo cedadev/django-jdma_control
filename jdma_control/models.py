@@ -553,6 +553,7 @@ class MigrationArchive(models.Model):
                             os.path.islink(file_path)):
                         ret_file_list.append(file_path)
             return ret_file_list
+    get_file_names.short_description = "Filelist"
 
     def get_filtered_file_names(self, prefix="", filelist=None):
         """Return a list of files from the archive to be / that have been uploaded.
@@ -578,6 +579,16 @@ class MigrationArchive(models.Model):
                         if f.path in filelist:
                             file_list.append(os.path.join(prefix, f.path))
             return file_list
+    get_filtered_file_names.short_description= "Filelist"
+
+    def get_filtered_file_names_string(self, prefix="", filelist=None):
+        """Convert the output of get_filtered file_names into a string buffer"""
+        output = ""
+        file_names = self.get_filtered_file_names(prefix, filelist)
+        for f in file_names:
+            output += f + "\n"
+        return output
+    get_filtered_file_names_string.short_description= "Filelist"
 
 @python_2_unicode_compatible
 class MigrationFile(models.Model):
