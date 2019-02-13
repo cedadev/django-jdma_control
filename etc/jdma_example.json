@@ -12,6 +12,7 @@
             "GET_HOST" : "jasmin_et-retrieval.fds.rl.ac.uk",
             "PORT" : 7456,
             "OBJECT_SIZE" : 2147483648,
+            "OBJECT_COUNT" : 5000,
             "THREADS" : 2
         },
 
@@ -20,14 +21,16 @@
             "ARCHIVE_STAGING_DIR" : "/home/vagrant/JDMA_STAGING",
             "FTP_ENDPOINT" : "192.168.51.21",
             "OBJECT_SIZE" : 1048576,
+            "OBJECT_COUNT" : 5000,
             "THREADS" : 2
         },
 
         "objectstore" : {
             "VERIFY_DIR"  : "/home/vagrant/JDMA_VERIFY",
             "ARCHIVE_STAGING_DIR" : "/home/vagrant/JDMA_STAGING",
-            "S3_ENDPOINT" : "http://130.246.129.81:9000",
+            "S3_ENDPOINT" : "http://192.168.51.30:9000",
             "OBJECT_SIZE" : 1048576,
+            "OBJECT_COUNT" : 5000,
             "THREADS" : 2
         }
     },

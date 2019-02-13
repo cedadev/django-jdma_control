@@ -163,10 +163,6 @@ def pack_request(pr, archive_staging_dir, config):
 
         # block here until all threads have completed
         for p in processes:
-            p[0].join()
-
-        # get the returned data
-        for p in processes:
             local_archive_list = p[1].get()
             # assign the digests and sizes to the archive
             for la in local_archive_list:
@@ -174,6 +170,8 @@ def pack_request(pr, archive_staging_dir, config):
                 archive.digest = la[2]
                 archive.size = la[3]
                 archive.save()
+            p[0].join()
+
     # the request has completed so transition the request to PUTTING and reset
     # the last archive
     pr.stage = MigrationRequest.PUT_PENDING
