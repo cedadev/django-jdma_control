@@ -61,14 +61,16 @@ def get_completed_puts(backend_object):
             n_up_arch = 0
             for archive in archive_set:
                 # get the list of files for this archive
-                file_list = archive.get_filtered_file_names()
+                if archive.packed:
+                    file_list = [archive.get_archive_name()]
+                else:
+                    file_list = archive.get_file_names()['FILE']
                 n_files = 0
                 for file_path in file_list:
                     # object name is the file_path, without any prefix
-                    object_name = file_path
                     try:
                         if s3c.head_object(Bucket=pr.migration.external_id,
-                                           Key=object_name):
+                                           Key=file_path):
                             n_files += 1
                     except:
                         pass
@@ -120,11 +122,16 @@ def get_completed_gets(backend_object):
                     staging_dir = get_download_dir(backend_object, gr)
                 else:
                     staging_dir = gr.target_path
+            # get filelist or single archive name
+            if archive.packed:
+                file_name_list = [archive.get_archive_name()]
+            else:
+                file_name_list = archive.get_file_names(
+                    filter_list=gr.filelist,
+                )['FILE']
+
             # now loop over each file in the archive
             n_completed_files = 0
-            file_name_list = archive.get_filtered_file_names(
-                filelist = gr.filelist
-            )
             for file_name in file_name_list:
                 file_path = os.path.join(staging_dir, file_name)
                 try:
@@ -219,7 +226,7 @@ class OS_DownloadProcess(multiprocessing.Process):
         self.thread_number = thread_number
 
     def run(self):
-        """Upload all the files in the sub file list."""
+        """Download all the files in the sub file list."""
         try:
             for object_name in self.filelist:
                 # external id is the bucket name, add this to the file name
@@ -372,9 +379,9 @@ class ObjectStoreBackend(Backend):
                                aws_access_key_id=credentials['access_key'],
                                aws_secret_access_key=credentials['secret_key'])
             s3c.list_buckets()
-            return True
-        except Exception:
-            return False
+            return "available"
+        except Exception as e:
+            return str(e)
 
     def monitor(self):
         """Determine which batches have completed."""
@@ -390,12 +397,12 @@ class ObjectStoreBackend(Backend):
 
     def pack_data(self):
         """Should the data be packed into a tarfile for this backend?"""
-        return True
+        return False
 
     def piecewise(self):
         """For the object store each archive can be uploaded one by one
         and uploads can be resumed."""
-        return True
+        return False
 
     def create_connection(self, user, workspace, credentials, mode="upload"):
         """Create connection to Object Store, using the supplied credentials"""

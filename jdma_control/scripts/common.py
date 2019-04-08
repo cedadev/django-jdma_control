@@ -3,15 +3,17 @@ import stat
 import datetime
 import hashlib
 import logging
+import subprocess
 import math
 from collections import namedtuple
 
-import jdma_site.settings as settings
+#import jdma_site.settings as settings
 import socket
 
 FileInfo = namedtuple('FileInfo',
                       ['filepath', 'size', 'digest', 'unix_user_id',
-                       'unix_group_id', 'unix_permission', 'is_dir'],
+                       'unix_group_id', 'unix_permission', 'ftype',
+                       'link_target'],
                        verbose=False)
 
 def split_args(args):
@@ -45,22 +47,26 @@ def get_file_info_tuple(filepath):
     """Get all the info for a file, and return in a tuple.
     Info is: size, SHA-256 digest, unix-uid, unix-gid, unix-permissions, dir?"""
     # get the permissions etc. of the original file
-    fstat = os.stat(filepath)
+    fstat = os.stat(filepath, follow_symlinks=False)
     size = fstat.st_size
+    link_target = ""
     # calc SHA256 digest
-    if stat.S_ISDIR(fstat.st_mode):
+    if stat.S_ISLNK(fstat.st_mode):
         digest = 0
-        is_dir = True
+        ftype = "LINK"
+        # get the link location
+        link_target = os.path.abspath(os.path.realpath(filepath))
+    elif stat.S_ISDIR(fstat.st_mode):
+        digest = 0
+        ftype = "DIR"
     else:
         digest = calculate_digest(filepath)
-        is_dir = False
+        ftype = "FILE"
     # get the unix user id owner of the file - just use the raw value and store
     # as integer now
     unix_user_id = fstat.st_uid
-
     # get unix group id - just use the raw value and store as integer
     unix_group_id = fstat.st_gid
-
     # get the unix permissions
     unix_permission = "{}".format(oct(fstat.st_mode))
     unix_permission = int(unix_permission[-3:])
@@ -71,7 +77,105 @@ def get_file_info_tuple(filepath):
         unix_user_id,
         unix_group_id,
         unix_permission,
-        is_dir
+        ftype,
+        link_target
+    )
+
+
+def restore_owner_and_group(mig, target_path):
+    # change the owner, group and permissions of the file to match that
+    # of the original from the user query
+
+    # start at the last_archive so that interrupted uploads can be resumed
+    st_arch = 0
+    n_arch = mig.migrationarchive_set.count()
+    archive_set = mig.migrationarchive_set.order_by('pk')
+    for arch_num in range(st_arch, n_arch):
+        # determine which archive to change the permissions for
+        archive = archive_set[arch_num]
+
+        # get the migration files in the archive
+        mig_files = archive.migrationfile_set.all()
+        for mig_file in mig_files:
+            # get the uid and gid
+            uidNumber = mig_file.unix_user_id
+            gidNumber = mig_file.unix_group_id
+
+            # form the file path
+            file_path = os.path.join(
+                target_path,
+                mig_file.path
+            )
+            # if it's a directory then recreate the directory
+            if mig_file.ftype == "DIR":
+                os.makedirs(file_path, exist_ok=True)
+
+            # if it's a link then reinstate the link!
+            link = False
+            if mig_file.ftype == "LNAS":
+                ln_tgt_path = file_path
+                ln_src_path = mig_file.link_target
+                link = True
+            elif mig_file.ftype == "LNCM":
+                ln_src_path = os.path.join(target_path, mig_file.link_target)
+                ln_tgt_path = file_path
+                link = True
+
+            if link:
+                # remove the synlink if it exists
+                try:
+                    os.symlink(ln_src_path, ln_tgt_path)
+                except OSError as e:
+                    if e.errno == os.errno.EEXIST:
+                        os.unlink(ln_tgt_path)
+                        os.symlink(ln_src_path, ln_tgt_path)
+
+            # Note that, if there is a filelist then the files may not exist
+            # However, to successfully restore any parent directories that may
+            # be created, we have to attempt to restore all of the files in the
+            # archive.  We'll do this by checking the filepath
+            if os.path.exists(file_path):
+                # change the directory owner / group
+                subprocess.call(
+                    ["/usr/bin/sudo",
+                     "/bin/chown",
+                     str(uidNumber)+":"+str(gidNumber),
+                     file_path]
+                )
+
+                # change the permissions back to the original
+                subprocess.call(
+                    ["/usr/bin/sudo",
+                     "/bin/chmod",
+                     str(mig_file.unix_permission),
+                     file_path]
+                )
+                logging.info(
+                    "Changed owner and file permissions for file {}".format(
+                        file_path
+                    )
+                )
+            else:
+                logging.error(
+                    "Could not change owner and permissions on file {}".format(
+                        file_path
+                    )
+                )
+    # restore the target_path
+    # change the directory owner / group
+    subprocess.call(
+        ["/usr/bin/sudo",
+         "/bin/chown",
+         str(mig.common_path_user_id)+":"+str(mig.common_path_group_id),
+         target_path]
+    )
+
+    # change the permissions back to the original
+    subprocess.call(
+        ["/usr/bin/sudo",
+         "/bin/chmod",
+         str(mig.common_path_permission),
+         target_path]
     )
 
 
@@ -86,6 +190,12 @@ def mark_migration_failed(mig_req, failure_reason, e_inst=None, upload_mig=True)
     # if a GET fails then the migration is unaffected
     if upload_mig:
         mig_req.migration.stage = Migration.FAILED
+        # Restore the file permissions so the users are not locked out of their
+        # files! :)
+        restore_owner_and_group(
+            mig_req.migration,
+            mig_req.migration.common_path
+        )
         #mig_req.migration.external_id = None
         mig_req.migration.save()
     mig_req.save()

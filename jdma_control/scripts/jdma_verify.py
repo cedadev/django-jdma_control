@@ -86,7 +86,10 @@ def verify(backend_object, pr, config):
         # determine which archive to stage (tar) and upload
         archive = archive_set[arch_num]
         # get a list of the filepaths
-        file_list = archive.get_filtered_file_names()
+        if archive.packed:
+            file_list = [archive.get_archive_name()]
+        else:
+            file_list = archive.get_file_names()['FILE']
         for file_path in file_list:
             # filename is concatenation of verify_dir and the original
             # file path

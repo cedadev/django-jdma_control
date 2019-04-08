@@ -79,7 +79,7 @@ def get_completed_puts(backend_object):
         archive_set = pr.migration.migrationarchive_set.order_by('pk')
         for archive in archive_set:
             # get the list of files for this archive
-            file_list = archive.get_filtered_file_names()
+            file_list = archive.get_file_names()['FILE']
             n_archive_files += len(file_list)
         # compare number synched with number in all archives
         if n_archive_files == n_synced:
@@ -282,9 +282,9 @@ class ElasticTapeBackend(Backend):
     def available(self, credentials):
         """Return whether the elastic tape is available or not"""
         try:
-            return True
+            return "available"
         except Exception:
-            return False
+            return "not available"
 
     def monitor(self, thread_number=None):
         """Determine which batches have completed."""

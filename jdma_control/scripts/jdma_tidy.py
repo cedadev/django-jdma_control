@@ -292,13 +292,15 @@ def unlock_original_files(backend_object, pr, config):
         for f in files_set:
             # get the full path
             path = os.path.join(pr.migration.common_path, f.path)
-            # append to the master file list
-            file_info_list.append((
-                path,
-                f.unix_user_id,
-                f.unix_group_id,
-                f.unix_permission
-            ))
+            # don't do anythin the links - as we didn't change them in the first place
+            if not (f.ftype == "LINK" or f.ftype == "LNCM" or f.ftype == "LNAS"):
+                # append to the master file list
+                file_info_list.append((
+                    path,
+                    f.unix_user_id,
+                    f.unix_group_id,
+                    f.unix_permission
+                ))
 
     if len(file_info_list) > 0:
         n_threads = config["THREADS"]

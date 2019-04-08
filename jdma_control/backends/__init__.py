@@ -1,11 +1,11 @@
 """Function to get the backends"""
 from jdma_control.backends import ElasticTapeBackend
-# from jdma_control.backends import ObjectStoreBackend
+from jdma_control.backends import ObjectStoreBackend
 # from jdma_control.backends import FTPBackend
 
 def get_backends():
-    return [ElasticTapeBackend.ElasticTapeBackend,]
-            # ObjectStoreBackend.ObjectStoreBackend,
+    return [ElasticTapeBackend.ElasticTapeBackend,
+            ObjectStoreBackend.ObjectStoreBackend,]
             # FTPBackend.FTPBackend]
 
 def get_backend_ids():
