@@ -126,16 +126,18 @@ def pack_request(pr, archive_staging_dir, config):
             archive.save()
             continue
 
-        tar_file_path = os.path.join(request_staging_dir,
-                                     archive.get_filtered_file_names()[0])
+        # create a path to store the tar file in
+        tar_file_path = archive.get_archive_name(prefix=request_staging_dir)
         # get the MigrationFiles belonging to this archive
-        migration_files = archive.migrationfile_set.all()
+        migration_files = archive.get_file_names(
+            prefix=pr.migration.common_path
+        )['FILE']
         # get a list of files with a full file path
         migration_paths = []
         for mf in migration_files:
             # maintain a tuple of path on filesystem, path inside the tarfile
             migration_paths.append(
-                (os.path.join(pr.migration.common_path, mf.path), mf.path)
+                (os.path.join(pr.migration.common_path, mf), mf)
             )
         # add to the archive_list so we can tar in parallel later
         archive_list.append(
@@ -221,9 +223,7 @@ def unpack_archive(archive_staging_dir, archive, external_id,
     """Unpack a tar file containing the files that are in the
        MigrationArchive object"""
     # create the name of the archive
-    archive_path = os.path.join(
-        archive_staging_dir,
-        archive.get_filtered_file_names()[0])
+    archive_path = archive.get_archive_name(archive_staging_dir)
     # create the target directory if it doesn't exist
     try:
         os.makedirs(target_path)

@@ -56,9 +56,9 @@ def get_completed_puts(backend_object):
             n_up_arch = 0
             for archive in archive_set:
                 # get the list of files for this archive
-                file_list = archive.get_filtered_file_names()
+                file_list = archive.get_file_names()['FILE']
                 n_files = 0
-                for file_path in file_list:
+                for file_path in file_list['FILE']:
                     # object name is the file_path, without the gws prefix
                     object_name = (pr.migration.external_id +
                                    "/" + file_path)
@@ -124,13 +124,13 @@ def get_completed_gets(backend_object):
                     staging_dir = gr.target_path
             # now loop over each file in the archive
             n_completed_files = 0
-            file_name_list = archive.get_filtered_file_names(
+            file_name_list = archive.get_file_names(
                 filelist = gr.filelist
             )
-            for file_name in file_name_list:
+            for file_name in file_name_list['FILE']:
                 file_path = os.path.join(staging_dir, file_name)
                 try:
-                    # just rely on exception thown if file does not exist yet
+                    # just rely on exception thrown if file does not exist yet
                     # now check for size
                     size = os.stat(file_path).st_size
                     # for packed archive check the archive size
@@ -611,7 +611,7 @@ class FTPBackend(Backend):
         file_list = []
         for archive in archive_set:
             # get the list of files for this archive
-            file_list.extend(archive.get_filtered_file_names())
+            file_list.extend(archive.get_file_names()['FILE'])
             # get the directories those files belong to and add to the global
             # list of directories
             dir_list = self.__get_list_of_directories(file_list)

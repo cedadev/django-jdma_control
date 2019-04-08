@@ -466,11 +466,11 @@ class MigrationRequestView(View):
             return HttpError(error_data, status=404)
 
         # 3a. Check that the named backend is available
-        if not JDMA_BACKEND_OBJECT.available(credentials):
+        availability = JDMA_BACKEND_OBJECT.available(credentials)
+        if availability != "available":
             error_data["error"] = (
-                "External storage: {} not available.  "
-                "Please see service anouncements and retry later"
-            ).format(JDMA_BACKEND_OBJECT.get_id())
+                "External storage: {} not connecting.  Reason is: {}"
+            ).format(JDMA_BACKEND_OBJECT.get_id(), availability)
             return HttpError(error_data, status=404)
         return None
 

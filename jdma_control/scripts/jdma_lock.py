@@ -47,29 +47,23 @@ def get_info_and_lock_file(user_name, files_dirs_list, q):
         except FileNotFoundError:
             # don't log in threads as it'll cause Quobyte to lock
             # instead create a FileInfo named tuple with some sentinel values
-            file_info = FileInfo(file_dir, -1, -1, -1, -1, -1, False)
+            file_info = FileInfo(file_dir, -1, -1, -1, -1, -1, "MISS")
         else:
-            # 1. change the owner of the file to be root
-            # 2. change the read / write permissions to be user-only
-            subprocess.call([
-                "/usr/bin/sudo",
-                "/bin/chown",
-                "root:root",
-                file_dir
-            ])
-            subprocess.call([
-                "/usr/bin/sudo",
-                "/bin/chmod",
-                "700",
-                file_dir
-            ])
-        file_infos.append(file_info)
+            file_infos.append(file_info)
     q.put(file_infos)
 
 
 def lock_put_migration(pr, config):
     """Move this to it's own function so that it can be used in threading.
     """
+    # This function can take a while so we have introduced a new state to the
+    # state machine: PUT_BUILDING.  Transistion to this now and put the
+    # migration into the PUTTING state.
+    pr.stage = MigrationRequest.PUT_BUILDING
+    pr.migration.stage = Migration.PUTTING
+    pr.migration.save()
+    pr.save()
+
     # loop over the files or directories - copy full paths for the files and
     # directories into a list
     file_infos = []
@@ -101,6 +95,9 @@ def lock_put_migration(pr, config):
     pr.migration.common_path_group_id = cp_file_info.unix_group_id
     pr.migration.common_path_permission = cp_file_info.unix_permission
 
+    # save here so these details can be used in the event of a migration FAILED
+    pr.migration.save()
+
     # now loop over the file list and get the fileinfo - this is
     # parallelised as it involves computing a checksum and changing file
     # permissions so is IO bound
@@ -128,14 +125,12 @@ def lock_put_migration(pr, config):
     subprocess.call([
         "/usr/bin/sudo",
         "/bin/chown",
-        "-R",
         "root:root",
         pr.migration.common_path
     ])
     subprocess.call([
         "/usr/bin/sudo",
         "/bin/chmod",
-        "-R",
         "700",
         pr.migration.common_path
     ])
@@ -176,18 +171,19 @@ def lock_put_migration(pr, config):
             # n_current_file
             mig_file = MigrationFile()
             fileinfo = file_infos[n_current_file]
-            # some fileinfos may have -1 as the size, as they are not found
+            # some files may type of "MISS", as they are not found
             # we don't want to add these to the migrations
-            if fileinfo.size == -1:
-                logging.info("PUT: Skipping file: {} as it is not found".format(
-                                mig_file.path))
+            if fileinfo.ftype == "MISS":
+                logging.info(
+                    "PUT: Skipping file: {} in archive: {} as it is not found".format(
+                                mig_file.path, mig_file.archive.name())
+                    )
                 n_current_file -= 1 # still have to iterate
                 continue
 
             # add the size to the current archive size
             current_size += fileinfo.size
-            # fill in the details
-            # the filepath has the commonprefix removed
+            # fill in the details - the filepath has the commonprefix removed
             mig_file.path = fileinfo.filepath.replace(
                 pr.migration.common_path, ""
             )
@@ -196,7 +192,31 @@ def lock_put_migration(pr, config):
             mig_file.unix_user_id = fileinfo.unix_user_id
             mig_file.unix_group_id = fileinfo.unix_group_id
             mig_file.unix_permission = fileinfo.unix_permission
+            mig_file.ftype = fileinfo.ftype
             mig_file.archive = mig_arc
+            # determine the link location.  There are two cases:
+            # 1. the link_target contains the common_path
+            # 2. the link_target does not contian the common_path
+            if fileinfo.ftype == "LINK":
+                if pr.migration.common_path in fileinfo.link_target:
+                    # strip the common path from the link_target
+                    mig_file.link_target = fileinfo.link_target.replace(
+                        pr.migration.common_path, ""
+                    )
+
+                    # set the ftype to be "LINK_COMMON" - LNCM
+                    mig_file.ftype = "LNCM"
+                    # remove the slash from the front of mig_file.link_target
+                    # as this messes up os.path.join
+                    if len(mig_file.link_target) > 0:
+                        if (mig_file.link_target[0] == "/"):
+                            mig_file.link_target = mig_file.link_target[1:]
+                else:
+                    # don't strip anything and set the ftype to be "LINK_ABSOLUTE"
+                    # - LNAS
+                    mig_file.link_target = fileinfo.link_target
+                    mig_file.ftype = "LNAS"
+                    # leave the file path as it is for the absolute path
 
             # add the size to the total size for the migration - to check
             # against the quota
@@ -215,7 +235,9 @@ def lock_put_migration(pr, config):
                 mig_file.archive.size = current_size
                 # save the Migration File
                 mig_file.save()
-                logging.info("PUT: Added file: " + mig_file.path)
+                logging.info("PUT: Added file: {} to archive: {}".format(
+                               mig_file.path, mig_file.archive.name()
+                            ))
         # save the migration archive
         mig_arc.save()
 
@@ -239,8 +261,6 @@ def lock_put_migration(pr, config):
         # set the MigrationRequest stage to be PUT_PACKING and the
         # Migration stage to be PUTTING
         pr.stage = MigrationRequest.PUT_PACKING
-        pr.migration.stage = Migration.PUTTING
-        pr.migration.save()
         pr.save()
 
 

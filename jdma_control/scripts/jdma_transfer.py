@@ -8,7 +8,6 @@
 
 import os
 import logging
-import subprocess
 from tarfile import TarFile
 import signal
 import sys
@@ -22,6 +21,7 @@ from jdma_control.models import StorageQuota
 import jdma_control.backends
 import jdma_control.backends.AES_tools as AES_tools
 from jdma_control.scripts.common import mark_migration_failed
+from jdma_control.scripts.common import restore_owner_and_group
 from jdma_control.scripts.common import calculate_digest, split_args
 from jdma_control.scripts.common import get_archive_set_from_get_request
 from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
@@ -63,7 +63,7 @@ def upload(backend_object, credentials, pr):
             pr.migration.save()
             pr.save()
             logging.info((
-                "Transition: request ID: {} external ID: {} PUT_PACKING->PUTTING, ON_DISK->PUTTING"
+                "Transition: request ID: {} external ID: {} PUT_PENDING->PUTTING, ON_DISK->PUTTING"
             ).format(pr.pk, pr.migration.external_id))
 
             # get the archive set here as it might change if we get it in the loop
@@ -79,13 +79,11 @@ def upload(backend_object, credentials, pr):
                     # check whether the archive is packed
                     if archive.packed:
                         prefix = get_staging_dir(backend_object, pr)
+                        file_list = [archive.get_archive_name(prefix)]
                     else:
                         prefix = pr.migration.common_path
-                    # get the list of files for this archive
-                    file_list = archive.get_file_names(
-                        prefix,
-                        directories = False
-                    )
+                        # get the list of files for this archive
+                        file_list = archive.get_file_names(prefix)['FILE']
                     # log message
                     logging.info((
                         "Uploading files: {} to {}"
@@ -107,15 +105,12 @@ def upload(backend_object, credentials, pr):
                 for archive in archive_set:
                     # get a list of files, using the relevant prefix
                     if archive.packed:
-                        # concat the directory path for the batch (internal_id)
                         prefix = get_staging_dir(backend_object, pr)
+                        archive_files = [archive.get_archive_name(prefix)]
                     else:
                         prefix = pr.migration.common_path
-                    # add files in this archive to those already added
-                    archive_files = archive.get_file_names(
-                        prefix,
-                        directories=False
-                    )
+                        # get the list of files for this archive
+                        archive_files = archive.get_file_names(prefix)['FILE']
                     file_list.extend(archive_files)
                 # log message
                 logging.info((
@@ -179,10 +174,7 @@ def verify(backend_object, credentials, pr):
         # get the name of the verification directory
         target_dir = get_verify_dir(backend_object, pr)
         # create the target directory if it doesn't exist
-        try:
-            os.makedirs(target_dir)
-        except:
-            pass
+        os.makedirs(target_dir, exist_ok=True)
 
         # for verify, we want to get the whole batch
         # get the archive set
@@ -192,7 +184,10 @@ def verify(backend_object, credentials, pr):
         file_list = []
         for archive in archive_set:
             # add files in this archive to those already added
-            archive_files = archive.get_filtered_file_names(prefix="")
+            if archive.packed:
+                archive_files = [archive.get_archive_name()]
+            else:
+                archive_files = archive.get_file_names()['FILE']
             file_list.extend(archive_files)
 
         logging.info((
@@ -262,16 +257,16 @@ def download(backend_object, credentials, gr):
                 target_dir = gr.target_path
 
             # create the target directory if it doesn't exist
-            try:
-                os.makedirs(target_dir)
-            except:
-                pass
+            os.makedirs(target_dir, exist_ok=True)
 
             # get the filelist - filter on digest and whether the file
             # has been requested
-            filt_file_list = archive.get_filtered_file_names(
-                filelist=gr.filelist
-            )
+            if archive.packed:
+                filt_file_list = [archive.get_archive_name()]
+            else:
+                filt_file_list = archive.get_file_names(
+                    filter_list=gr.filelist
+                )['FILE']
             # if piecewise then download bit by bit, otherwise add to file_list
             # and download at the end
             if backend_object.piecewise():
@@ -394,78 +389,10 @@ def put_transfers(backend_object, key):
     return put_count
 
 
-def restore_owner_and_group(backend_object, gr):
+def restore_owner_and_group_on_get(backend_object, gr):
     # change the owner, group and permissions of the file to match that
     # of the original from the user query
-
-    # start at the last_archive so that interrupted uploads can be resumed
-    st_arch = 0 #gr.last_archive
-    n_arch = gr.migration.migrationarchive_set.count()
-    archive_set = gr.migration.migrationarchive_set.order_by('pk')
-    for arch_num in range(st_arch, n_arch):
-        # determine which archive to change the permissions for
-        archive = archive_set[arch_num]
-
-        # get the migration files in the archive
-        mig_files = archive.migrationfile_set.all()
-        for mig_file in mig_files:
-            # get the uid and gid
-            uidNumber = mig_file.unix_user_id
-            gidNumber = mig_file.unix_group_id
-
-            # form the file path
-            file_path = os.path.join(
-                gr.target_path,
-                mig_file.path
-            )
-
-            # Note that, if there is a filelist then the files may not exist
-            # However, to successfully restore any parent directories that may
-            # be created, we have to attempt to restore all of the files in the
-            # archive.  We'll do this by checking the filepath
-            if os.path.exists(file_path):
-                # change the directory owner / group
-                subprocess.call(
-                    ["/usr/bin/sudo",
-                     "/bin/chown",
-                     str(uidNumber)+":"+str(gidNumber),
-                     file_path]
-                )
-
-                # change the permissions back to the original
-                subprocess.call(
-                    ["/usr/bin/sudo",
-                     "/bin/chmod",
-                     str(mig_file.unix_permission),
-                     file_path]
-                )
-                logging.info(
-                    "Changed owner and file permissions for file {}".format(
-                        file_path
-                    )
-                )
-            else:
-                logging.error(
-                    "Could not change owner and permissions on file {}".format(
-                        file_path
-                    )
-                )
-    # restore the target_path
-    # change the directory owner / group
-    subprocess.call(
-        ["/usr/bin/sudo",
-         "/bin/chown",
-         str(gr.migration.common_path_user_id)+":"+str(gr.migration.common_path_group_id),
-         gr.target_path]
-    )
-
-    # change the permissions back to the original
-    subprocess.call(
-        ["/usr/bin/sudo",
-         "/bin/chmod",
-         str(gr.migration.common_path_permission),
-         gr.target_path]
-    )
+    restore_owner_and_group(gr.migration, gr.target_path)
 
     # if we reach this point then the restoration has finished.
     # next stage is tidy up
@@ -521,7 +448,7 @@ def get_transfers(backend_object, key):
             # restore the file permissions
             try:
                 get_count += 1
-                restore_owner_and_group(backend_object, gr)
+                restore_owner_and_group_on_get(backend_object, gr)
             except Exception as e:
                 mark_migration_failed(gr, str(e), e, upload_mig=False)
         gr.unlock()

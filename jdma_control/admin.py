@@ -81,10 +81,12 @@ admin.site.register(MigrationRequest, MigrationRequestAdmin)
 
 class MigrationFileAdmin(admin.ModelAdmin):
     save_on_top = True
-    list_display = ('pk', 'path', 'formatted_size', 'archive')
+    list_display = ('pk', 'path', 'formatted_size', 'ftype', 'archive')
     fields = ('path', 'digest', 'formatted_size', 'unix_user_id',
-              'unix_group_id', 'unix_permission', 'link_to_archive')
-    readonly_fields = ('digest', 'formatted_size', 'link_to_archive')
+              'unix_group_id', 'unix_permission', 'ftype', 'link_target',
+              'link_to_archive')
+    list_filter = ('ftype',)
+    readonly_fields = ('digest', 'formatted_size', 'ftype', 'link_to_archive')
     search_fields = ('path',)
 
     def link_to_archive(self, obj):
@@ -97,27 +99,14 @@ class MigrationFileAdmin(admin.ModelAdmin):
 admin.site.register(MigrationFile, MigrationFileAdmin)
 
 
-class MigrationFileInline(admin.TabularInline):
-    model = MigrationFile
-    fields = ('formatted_size',)
-    readonly_fields = ('formatted_size',)
-    can_delete = False
-    extra = 0
-    show_change_link = True
-
-    def has_add_permission(self, request):
-        return False
-
-
 class MigrationArchiveAdmin(admin.ModelAdmin):
     save_on_top = True
     list_display = ('pk', 'migration', 'formatted_size', 'digest')
     fields = ('link_to_migration', 'formatted_size', 'digest', 'packed',
-              'get_filtered_file_names_string')
+              'get_file_list_text')
     readonly_fields = ('link_to_migration', 'formatted_size', 'digest',
-                       'packed', 'get_filtered_file_names_string')
+                       'packed', 'get_file_list_text')
     search_fields = ('migration.workspace',)
-    #inlines = [MigrationFileInline]
 
     def link_to_migration(self, obj):
         link = reverse('admin:jdma_control_migration_change',

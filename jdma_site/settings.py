@@ -70,8 +70,8 @@ DATABASES = {
         'default' : {
                                 'ENGINE' : 'django.db.backends.postgresql',
                                             'HOST' : '/tmp',
-                                            'ATOMIC_REQUESTS' : True,
                                             'NAME' : 'jdma_control',
+                                            'ATOMIC_REQUESTS' : True,
                         },
     }
 

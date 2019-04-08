@@ -276,14 +276,15 @@ class MigrationRequest(models.Model):
     # all transactions occur through the MigrationRequest, rather than a hybrid
     # of the Migration and MigrationRequest
     PUT_START=0
-    PUT_PENDING=1
-    PUT_PACKING=2
-    PUTTING=3
-    VERIFY_PENDING=4
-    VERIFY_GETTING=5
-    VERIFYING=6
-    PUT_TIDY=7
-    PUT_COMPLETED=8
+    PUT_BUILDING=1
+    PUT_PENDING=2
+    PUT_PACKING=3
+    PUTTING=4
+    VERIFY_PENDING=5
+    VERIFY_GETTING=6
+    VERIFYING=7
+    PUT_TIDY=8
+    PUT_COMPLETED=9
 
     GET_START=100
     GET_PENDING=101
@@ -302,6 +303,7 @@ class MigrationRequest(models.Model):
     FAILED=1000
 
     REQ_STAGE_CHOICES = ((PUT_START, 'PUT_START'),
+                         (PUT_BUILDING, 'PUT_BUILDING'),
                          (PUT_PENDING, 'PUT_PENDING'),
                          (PUT_PACKING, 'PUT_PACKING'),
                          (PUTTING, 'PUTTING'),
@@ -328,6 +330,7 @@ class MigrationRequest(models.Model):
                          (FAILED, 'FAILED'))
 
     REQ_STAGE_LIST = {PUT_START : 'PUT_START',
+                      PUT_BUILDING : 'PUT_BUILDING',
                       PUT_PENDING : 'PUT_PENDING',
                       PUT_PACKING : 'PUT_PACKING',
                       PUTTING : 'PUTTING',
@@ -528,67 +531,46 @@ class MigrationArchive(models.Model):
         # get the migration
         return "Archive " + str(self.pk)
 
-    def get_file_names(self, prefix="", directories=True):
-        """Return a list of files from the archive to be / that have been uploaded.
-           If the archive is packed, then return the archive id + ".tar".
-           If the archive is not packed then return the files without the
-             common path prefix.
-           This function can return all of the files in the archive, including
-           the directories.  This is necessary, for the restore procedure, to
-           restore the permissions of the directories.
-           Alternatively, directories can be filtered out using directories=False"""
-        if self.packed:
-            return [os.path.join(prefix, self.get_id() + ".tar")]
+    def get_archive_name(self, prefix=""):
+        """Get the name of the archive, if the archive is packed"""
+        if not self.packed:
+            return ""
         else:
-            # not packed, return a list of the files in the archive
-            file_list = [os.path.join(prefix,
-                         f.path) for f in self.migrationfile_set.all()]
-            # check whether directories should be returned or not
-            if directories:
-                ret_file_list = file_list
-            else:
-                ret_file_list = []
-                for file_path in file_list:
-                    if not (os.path.isdir(file_path) or
-                            os.path.islink(file_path)):
-                        ret_file_list.append(file_path)
-            return ret_file_list
-    get_file_names.short_description = "Filelist"
+            return os.path.join(prefix, self.get_id() + ".tar")
 
-    def get_filtered_file_names(self, prefix="", filelist=None):
-        """Return a list of files from the archive to be / that have been uploaded.
-           If the archive is packed, then return the archive id + ".tar".
-           If the archive is not packed then return the files without the
-             common path prefix.
-           This function filters out any files which have a digest of 0 as these
-           are directories.  This list can then be used to upload to the backends.
+
+    def get_file_names(self, prefix="", filter_list=None):
+        """Return a dictionary of three lists of files from the archive to be
+           / that have been uploaded.
+           The dictionary consists of:
+             {"FILE" : [list of files],
+              "DIR"  : [list of directories],
+              "LINK" : [list of links],
+              "LNCM" : [list of links with relation to a common path],
+              "LNAS" : [list of links with absolute path]}
            The function can also be given an optional filelist, to only include
            files that are in the filelist.  This is so that GET requests can
            specify a subset of files to download.
         """
-        if self.packed:
-            return [os.path.join(prefix, self.get_id() + ".tar")]
-        else:
-            # not packed, return a list of the files in the archive
-            file_list = []
-            for f in self.migrationfile_set.all():
-                if f.digest != "0":
-                    if filelist is None:
-                        file_list.append(os.path.join(prefix, f.path))
-                    else:
-                        if f.path in filelist:
-                            file_list.append(os.path.join(prefix, f.path))
-            return file_list
-    get_filtered_file_names.short_description= "Filelist"
+        # not packed, return a list of the files in the archive
+        file_list = {"FILE" : [], "DIR" : [],
+                     "LINK" : [], "LNAS" : [], "LNCM" : []}
+        for f in self.migrationfile_set.all():
+            if filter_list is None:
+                file_list[f.ftype].append(os.path.join(prefix, f.path))
+            else:
+                if f.path in filter_list:
+                    file_list[f.ftype].append(os.path.join(prefix, f.path))
+        return file_list
+    get_file_names.short_description= "Filelist"
 
-    def get_filtered_file_names_string(self, prefix="", filelist=None):
+    def get_file_list_text(self):
         """Convert the output of get_filtered file_names into a string buffer"""
         output = ""
-        file_names = self.get_filtered_file_names(prefix, filelist)
-        for f in file_names:
-            output += f + "\n"
+        for f in self.migrationfile_set.all():
+            output += f.path + " : " + f.ftype + "\n"
         return output
-    get_filtered_file_names_string.short_description= "Filelist"
+    get_file_list_text.short_description= "List of files in archive"
 
 @python_2_unicode_compatible
 class MigrationFile(models.Model):
@@ -613,7 +595,19 @@ class MigrationFile(models.Model):
         default=0,
         help_text="size of file in bytes"
     )
-
+    # file type - a string, either "FILE", "DIR", "LINK", "LNCM", "LNAS" or "MISS" (missing)
+    ftype = models.CharField(
+        max_length=4,
+        null=False,
+        default="FILE",
+        help_text="Type of the file"
+    )
+    # link location - we can then restore links on restore
+    link_target = models.CharField(
+        max_length=1024,
+        null=True,
+        help_text="Relative (for LNAS) and absolute (for LNCM) path to the linked file location"
+    )
     # user id, group id and permissions - record what they are so that they
     # can be restored when the directory is restored
     unix_user_id = models.IntegerField(
@@ -644,4 +638,4 @@ class MigrationFile(models.Model):
     formatted_size.short_description = "size"
 
     def __str__(self):
-        return self.path
+        return "{} {}".format(self.path, self.ftype)

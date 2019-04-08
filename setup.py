@@ -9,26 +9,25 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 
 setup(
     name='jdma_control',
-    version='0.2.14',
+    version='0.2.15',
     packages=['jdma_control'],
     install_requires=[
         'appdirs',
         'beautifulsoup4',
+        'boto3',
         'django',
-        'django-sizefield',
         'django-extensions',
         'django-multiselectfield',
+        'django-sizefield',
         'html5lib',
-        'psycopg2-binary',
+        'lxml',
+        'jasmin-ldap',
         'packaging',
+        'psycopg2-binary',
+        'pycryptodome',
         'pyparsing',
         'pytz',
-        'six',
-        'feedgen',
-        'feedparser',
-        'jasmin-ldap',
-        'pycryptodome',
-        'boto3'
+        'requests'
     ],
     include_package_data=True,
     license='my License',  # example license
