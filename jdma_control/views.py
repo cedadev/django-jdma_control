@@ -639,8 +639,8 @@ class MigrationRequestView(View):
                 dup_req = MigrationRequest.objects.filter(
                     migration=migration,
                     target_path=target_path,
-                    filelist=filelist
-                )
+                    filelist=filelist,
+                ).exclude(stage=MigrationRequest.GET_COMPLETED)
                 if len(dup_req) != 0:
                     error_data["error"] = (
                         "Duplicate GET request made: batch: {}, Target path: {}"

@@ -606,7 +606,7 @@ class MigrationFile(models.Model):
     link_target = models.CharField(
         max_length=1024,
         null=True,
-        help_text="Relative (for LNAS) and absolute (for LNCM) path to the linked file location"
+        help_text="Relative (for LNCM) and absolute (for LNAS) path to the linked file location"
     )
     # user id, group id and permissions - record what they are so that they
     # can be restored when the directory is restored

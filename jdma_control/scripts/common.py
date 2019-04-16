@@ -95,7 +95,9 @@ def restore_owner_and_group(mig, target_path):
         archive = archive_set[arch_num]
 
         # get the migration files in the archive
-        mig_files = archive.migrationfile_set.all()
+        # order by file type, so the "D"IRS are created  before the "F"iles,
+        # which are created before the "L"INKS
+        mig_files = archive.migrationfile_set.all().order_by("ftype")
         for mig_file in mig_files:
             # get the uid and gid
             uidNumber = mig_file.unix_user_id
@@ -106,15 +108,19 @@ def restore_owner_and_group(mig, target_path):
                 target_path,
                 mig_file.path
             )
+            # determine whether it's a link
+            link = False
+
             # if it's a directory then recreate the directory
             if mig_file.ftype == "DIR":
+                logging.info(
+                    "Created directory: {}".format(
+                    file_path
+                ))
                 os.makedirs(file_path, exist_ok=True)
-
-            # if it's a link then reinstate the link!
-            link = False
-            if mig_file.ftype == "LNAS":
-                ln_tgt_path = file_path
+            elif mig_file.ftype == "LNAS":
                 ln_src_path = mig_file.link_target
+                ln_tgt_path = file_path
                 link = True
             elif mig_file.ftype == "LNCM":
                 ln_src_path = os.path.join(target_path, mig_file.link_target)
@@ -122,13 +128,29 @@ def restore_owner_and_group(mig, target_path):
                 link = True
 
             if link:
-                # remove the synlink if it exists
+                # remove the symlink if it exists
                 try:
                     os.symlink(ln_src_path, ln_tgt_path)
+                    logging.info(
+                        "Created symlink from {} to {}".format(
+                        ln_src_path, ln_tgt_path
+                    )
+                )
                 except OSError as e:
                     if e.errno == os.errno.EEXIST:
                         os.unlink(ln_tgt_path)
                         os.symlink(ln_src_path, ln_tgt_path)
+                        logging.info(
+                            "Deleted then created symlink from {} to {}".format(
+                                ln_src_path, ln_tgt_path
+                            )
+                        )
+                except Exception as e:
+                    logging.error(
+                        "Could not create symlink from {} to {} : {}".format(
+                            ln_src_path, ln_tgt_path, str(e)
+                        )
+                    )
 
             # Note that, if there is a filelist then the files may not exist
             # However, to successfully restore any parent directories that may
