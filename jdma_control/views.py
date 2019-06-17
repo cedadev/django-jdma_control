@@ -769,7 +769,8 @@ class MigrationRequestView(View):
 
                 # five checks:
                 #   1. Check the path exists (obvs.) or that each path in the
-                #      filelist exists
+                #      filelist exists (this will be really slow for large
+                #      filelists, we should probably remove it)
                 #   2. Check the user has write permission to the directory or each
                 #      of the files
                 #   3. Check that the backend exists and that the
@@ -1008,10 +1009,15 @@ class MigrationView(View):
             return HttpError({"error": "No name supplied."})
 
         # return details of a single batch
-        if "migration_id" in request.GET:
+        if ("migration_id" in request.GET or
+            "label" in request.GET):
             # get the keywords
-            keyargs = {"pk": int(request.GET.get("migration_id")),
-                       "user__name": request.GET.get("name")}
+            if "migration_id" in request.GET:
+                keyargs = {"pk": int(request.GET.get("migration_id")),
+                           "user__name": request.GET.get("name")}
+            elif "label" in request.GET:
+                keyargs = {"label": request.GET.get("label"),
+                           "user__name": request.GET.get("name")}
             if "workspace" in request.GET:
                 workspace = request.GET.get("workspace")
                 # get the workspace object
