@@ -1013,11 +1013,15 @@ class MigrationView(View):
             "label" in request.GET):
             # get the keywords
             if "migration_id" in request.GET:
-                keyargs = {"pk": int(request.GET.get("migration_id")),
+                migration_id = int(request.GET.get("migration_id"))
+                keyargs = {"pk": migration_id,
                            "user__name": request.GET.get("name")}
+                label_id = None
             elif "label" in request.GET:
-                keyargs = {"label": request.GET.get("label"),
+                label_id = request.GET.get("label")
+                keyargs = {"label": label_id,
                            "user__name": request.GET.get("name")}
+                migration_id = None
             if "workspace" in request.GET:
                 workspace = request.GET.get("workspace")
                 # get the workspace object
@@ -1038,10 +1042,17 @@ class MigrationView(View):
             except Exception:
                 # return error as easily interpreted JSON
                 error_data = {"error": "Batch not found.",
-                              "migration_id": keyargs["pk"],
                               "name": keyargs["user__name"]}
+
+                if migration_id:
+                    error_data["migration_id"] = migration_id
+
+                if label_id:
+                    error_data["label"] = label_id
+
                 if workspace:
                     error_data["workspace"] = workspace
+
                 return HttpError(error_data)
 
             # full details - these are all the required fields
