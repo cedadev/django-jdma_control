@@ -476,6 +476,7 @@ def delete(backend_object, credentials, dr):
         dr.migration.stage = Migration.DELETING
         dr.stage = MigrationRequest.DELETING
         dr.migration.save()
+        dr.save()
         logging.info((
             "Deleting batch: {} from {}"
         ).format(dr.migration.external_id, backend_object.get_name()))

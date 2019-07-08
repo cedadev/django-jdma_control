@@ -87,7 +87,10 @@ def lock_put_migration(pr, config):
             files_dirs_list.extend(fd)
 
     # find the common path for the file_infos.filepath
-    pr.migration.common_path = os.path.commonprefix(files_dirs_list)
+    # pr.migration.common_path = os.path.commonprefix(files_dirs_list)
+    # NRM / AI 23/05/2019 - changed this to find the common path for the file
+    # list so as to cope with directories that have 1 directory inside them.
+    pr.migration.common_path = os.path.commonprefix(pr.filelist)
     # get the fileinfo for the common path
     cp_file_info = get_file_info_tuple(pr.migration.common_path)
 

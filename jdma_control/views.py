@@ -793,17 +793,17 @@ class MigrationRequestView(View):
 
                 # 2. check that the user has write permissions for each file or
                 # directory in the file list
-                error = False
-                error_data["error"] = ""
-                for f in data["filelist"]:
-                    if not user_has_write_permission(f, data["name"]):
-                        error_data["error"] += (
-                            "User does not have write permission for "
-                            "file/directory: {}"
-                        ).format(f)
-                        error = True
-                if error:
-                    return HttpError(error_data, status=403)
+                # error = False
+                # error_data["error"] = ""
+                # for f in data["filelist"]:
+                #     if not user_has_write_permission(f, data["name"]):
+                #         error_data["error"] += (
+                #             "User does not have write permission for "
+                #             "file/directory: {}"
+                #         ).format(f)
+                #         error = True
+                # if error:
+                #     return HttpError(error_data, status=403)
 
                 # 3, 3a, 3b check the backend
                 JDMA_BACKEND_OBJECT = \
