@@ -3,12 +3,13 @@
    This script is run via ./manage runscript"""
 
 import jdma_site.settings as settings
+import logging
+import signal
 from jdma_control.models import User, Groupworkspace, StorageQuota
+from jdma_control.scripts.config import read_backend_config
+from jdma_control.scripts.config import get_logging_format, get_logging_level
 from xml.dom.minidom import parseString
 import requests
-
-ET_QUOTA_URL = "http://et-monitor.fds.rl.ac.uk/et_user/ET_Holdings_Summary_XML.php"
-ET_EXPORT_URL = "http://cedadb.ceda.ac.uk/gws/etexport/"
 
 def get_et_gws_from_url(url):
     # Fetch the (plain text) file of the gws and et quotas
@@ -24,8 +25,7 @@ def get_et_gws_from_url(url):
             ret_data.append(d)
         return ret_data
     else:
-        #logging.error("Could not read from URL: " + url)
-        print("Could not read from URL: " + url)
+        logging.error("Could not read from URL: " + url)
         return None
 
 def create_user_entry(line):
@@ -74,7 +74,7 @@ def create_quota_entry(storageid, new_gws, quota_size, quota_used):
         new_sq.save()
 
 
-def create_user_gws_quotas(data):
+def create_user_gws_quotas(data, config):
     # Create the User, GroupWorkspace and StorageQuota from each line of the
     # data
     storageid = StorageQuota.get_storage_index("elastictape")
@@ -83,7 +83,8 @@ def create_user_gws_quotas(data):
             # create the user entry using the above script
             new_gws = create_user_entry(line)
             # get the quota and quota used
-            quota, quota_used = get_et_quota_used(ET_QUOTA_URL, line[0])
+            quota, quota_used = get_et_quota_used(config["ET_QUOTA_URL"],
+                                                  line[0])
             # create the new storage quota and assign the workspace
             create_quota_entry(storageid, new_gws, int(line[2]), quota_used)
 
@@ -94,7 +95,9 @@ def get_et_quota_used(url, workspace):
     quota_url = url + "?workspace=" + workspace + "&caller=etjasmin"
     quota_xml = requests.get(quota_url)
     if quota_xml.status_code != 200:
-        raise Exception("Could not read quota URL: " + quota_url)
+        error_msg = "Could not read quota URL: " + quota_url
+        logging.error(error_msg)
+        raise Exception(error_msg)
     # try parsing the XML into a XML dom
     try:
         # get the quota amount and the quota used
@@ -106,10 +109,30 @@ def get_et_quota_used(url, workspace):
         # calculate remaining quota
         quota_remaining = quota - quota_used
     except Exception:
-        raise Exception("Could not parse XML document at: " + quota_url)
+        error_msg = "Could not parse XML document at: " + quota_url
+        logging.error(error_msg)
+        raise Exception(error_msg)
     return quota, quota_used
 
+def exit_handler(signal, frame):
+    logging.info("Stopping import_et_gws")
+    sys.exit(0)
 
 def run():
-    data = get_et_gws_from_url(ET_EXPORT_URL)
-    create_user_gws_quotas(data)
+    # setup the logging
+    config = read_backend_config("elastictape")
+    logging.basicConfig(
+        format=get_logging_format(),
+        level="INFO",
+        datefmt='%Y-%d-%m %I:%M:%S'
+    )
+    logging.info("Starting import_et_gws")
+
+    # setup exit signal handling
+    signal.signal(signal.SIGINT, exit_handler)
+    signal.signal(signal.SIGHUP, exit_handler)
+    signal.signal(signal.SIGTERM, exit_handler)
+
+    data = get_et_gws_from_url(config["ET_EXPORT_URL"])
+
+    create_user_gws_quotas(data, config)

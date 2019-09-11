@@ -35,7 +35,7 @@ class MigrationAdmin(admin.ModelAdmin):
               'external_id', 'registered_date',
               'common_path', 'common_path_user_id', 'common_path_group_id',
               'common_path_permission')
-    readonly_fields = ('storage', #'external_id',
+    readonly_fields = ('storage', 'external_id',
                        'common_path', 'common_path_user_id',
                        'common_path_group_id', 'common_path_permission')
 
@@ -120,19 +120,22 @@ admin.site.register(MigrationArchive, MigrationArchiveAdmin)
 
 class StorageQuotaAdmin(admin.ModelAdmin):
     save_on_top = True
-    list_display = ('pk', 'storage', 'workspace', 'quota_formatted_size',
+    list_display = ('pk', 'storage', 'workspace',
+                    'quota_formatted_size',
                     'quota_formatted_used')
     list_filter = ('storage', 'workspace')
-    fields = ('storage', 'workspace', 'quota_size', 'quota_formatted_used')
-    readonly_fields = ('quota_formatted_used',)
+    fields = ('storage', 'workspace', 'quota_formatted_used',
+              'quota_formatted_size')
+    readonly_fields = ('storage', 'workspace',
+                       'quota_formatted_used', 'quota_formatted_size')
     search_fields = ('workspace',)
 admin.site.register(StorageQuota, StorageQuotaAdmin)
 
 
 class StorageQuotaInline(admin.TabularInline):
     model = StorageQuota
-    readonly_fields = ('quota_formatted_used',)
-    fields = ('storage', 'quota_size', 'quota_formatted_used',)
+    readonly_fields = ('storage', 'quota_formatted_size', 'quota_formatted_used',)
+    fields = ('storage', 'quota_formatted_size', 'quota_formatted_used',)
     extra = 0
 
 

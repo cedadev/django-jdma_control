@@ -115,11 +115,11 @@ class StorageQuota(models.Model):
 
     def quota_formatted_used(self):
         return filesizeformat(self.quota_used)
-    quota_formatted_used.short_description = "quota_used"
+    quota_formatted_used.short_description = "Quota used"
 
     def quota_formatted_size(self):
         return filesizeformat(self.quota_size)
-    quota_formatted_size.short_description = "quota_size"
+    quota_formatted_size.short_description = "Quota size"
 
     def get_name(self):
         return StorageQuota.__STORAGE_CHOICES[self.storage][1]

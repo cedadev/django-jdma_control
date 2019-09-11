@@ -1,17 +1,17 @@
 appdirs==1.4.3
-beautifulsoup4==4.6.3
-boto3==1.9.9
-django==2.0.8
-django-extensions==2.1.2
+beautifulsoup4==4.8.0
+boto3==1.9.226
+django==2.2.5
+django-extensions==2.2.1
 django-multiselectfield==0.1.8
-django-sizefield==0.9.1
+django-sizefield==1.0.0
 html5lib==1.0.1
-lxml==4.3.3
+lxml==4.4.1
 -e git+https://github.com/cedadev/jasmin-ldap.git@9d62daaeaecca56e320b86f68bee2ad2f745a0ca#egg=jasmin_ldap
 -e svn+https://svn.esc.rl.ac.uk/repos/jasmin_et/code/tags/0.3.1.3_Py3.6Specific/elastic_tape#egg=elastic_tape
-packaging==17.1
-psycopg2-binary==2.7.5
-pycryptodome==3.6.6
-pyparsing==2.2.1
-pytz==2018.5
-requests==2.21.0
+packaging==19.1
+psycopg2-binary==2.8.3
+pycryptodome==3.9.0
+pyparsing==2.4.2
+pytz==2019.2
+requests==2.22.0

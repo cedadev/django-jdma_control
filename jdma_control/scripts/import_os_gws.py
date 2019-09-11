@@ -4,11 +4,13 @@
    This script is run via ./manage runscript"""
 
 import jdma_site.settings as settings
+import logging
+import signal
 from jdma_control.models import User, Groupworkspace, StorageQuota
+from jdma_control.scripts.config import read_backend_config
+from jdma_control.scripts.config import get_logging_format, get_logging_level
 from jdma_control.scripts.import_et_gws import get_et_gws_from_url
 from jdma_control.scripts.import_et_gws import create_user_entry, create_quota_entry
-
-ET_EXPORT_URL = "http://cedadb.ceda.ac.uk/gws/etexport/"
 
 def create_user_gws_quotas(data):
     # Create the User, GroupWorkspace and StorageQuota from each line of the
@@ -21,6 +23,25 @@ def create_user_gws_quotas(data):
             # create the new storage quota
             create_quota_entry(storageid, new_gws, 32 * 10**12, 0)
 
+def exit_handler(signal, frame):
+    logging.info("Stopping import_et_gws")
+    sys.exit(0)
+
 def run():
-    data = get_et_gws_from_url(ET_EXPORT_URL)
+    # setup the logging
+    config = read_backend_config("objectstore")
+    logging.basicConfig(
+        format=get_logging_format(),
+        level="INFO",
+        datefmt='%Y-%d-%m %I:%M:%S'
+    )
+    logging.info("Starting import_os_gws")
+
+    # setup exit signal handling
+    signal.signal(signal.SIGINT, exit_handler)
+    signal.signal(signal.SIGHUP, exit_handler)
+    signal.signal(signal.SIGTERM, exit_handler)
+
+    data = get_et_gws_from_url(config["OS_EXPORT_URL"])
+
     create_user_gws_quotas(data)
