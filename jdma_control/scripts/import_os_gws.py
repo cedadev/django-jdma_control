@@ -5,6 +5,7 @@
 
 import jdma_site.settings as settings
 import logging
+import sys
 import signal
 from jdma_control.models import User, Groupworkspace, StorageQuota
 from jdma_control.scripts.config import read_backend_config
