@@ -7,9 +7,11 @@ import jdma_site.settings as settings
 import logging
 import sys
 import signal
+from time import sleep
 from jdma_control.models import User, Groupworkspace, StorageQuota
-from jdma_control.scripts.config import read_backend_config
+from jdma_control.scripts.config import read_process_config
 from jdma_control.scripts.config import get_logging_format, get_logging_level
+from jdma_control.scripts.common import split_args
 from jdma_control.scripts.import_et_gws import get_et_gws_from_url
 from jdma_control.scripts.import_et_gws import create_user_entry, create_quota_entry
 
@@ -30,7 +32,7 @@ def exit_handler(signal, frame):
 
 def run(*args):
     # setup the logging
-    config = read_backend_config("import_os_gws")
+    config = read_process_config("import_os_gws")
     logging.basicConfig(
         format=get_logging_format(),
         level="INFO",
@@ -46,6 +48,7 @@ def run(*args):
     data = get_et_gws_from_url(config["OS_EXPORT_URL"])
 
     # decide whether to run as a daemon
+    arg_dict = split_args(args)
     if "daemon" in arg_dict:
         if arg_dict["daemon"].lower() == "true":
             daemon = True
@@ -58,7 +61,7 @@ def run(*args):
     if daemon:
         # loop this indefinitely until the exit signals are triggered
         while True:
-            create_user_gws_quotas(data, config)
+            create_user_gws_quotas(data)
             sleep(int(config["RUN_EVERY"]))
     else:
-        create_user_gws_quotas(data, config)
+        create_user_gws_quotas(data)

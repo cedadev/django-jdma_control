@@ -494,10 +494,10 @@ def DELETE_tidy(backend_object, config):
             for gr in get_reqs:
                 if (gr.stage > MigrationRequest.GET_PENDING and
                     gr.stage < MigrationRequest.GET_COMPLETED):
-                    pr.lock()
+                    gr.lock()
                     # remove the temporary staged archive files
                     remove_archive_files(backend_object, gr)
-                    pr.unlock()
+                    gr.unlock()
 
             # update the request to DELETE_COMPLETED
             dr.stage = MigrationRequest.DELETE_COMPLETED
@@ -511,7 +511,7 @@ def DELETE_tidy(backend_object, config):
             dr.save()
             # update the quota
             update_storage_quota(backend_object, dr.migration, update="delete")
-            send_delete_notification_email(backend_object, gr)
+            send_delete_notification_email(backend_object, dr)
             dr.unlock()
         except Exception as e:
             logging.error("Error in DELETE_tidy {}".format(str(e)))

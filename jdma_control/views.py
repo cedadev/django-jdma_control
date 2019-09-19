@@ -747,7 +747,10 @@ class MigrationRequestView(View):
                 # check that there is not already an entry with this exact same
                 # filelist
                 # get the first file
-                if MigrationRequest.objects.filter(filelist=data["filelist"]):
+                if MigrationRequest.objects.filter(
+                    filelist=data["filelist"],
+                    stage__lt=MigrationRequest.DELETE_COMPLETED
+                ):
                     error_data["error"] = (
                         "Filelist or directory {}... is already in a migration"
                     ).format(data["filelist"][0])
