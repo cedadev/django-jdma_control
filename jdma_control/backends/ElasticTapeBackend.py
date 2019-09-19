@@ -59,7 +59,7 @@ def get_completed_puts(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise Exception(ET_Settings["ET_ROLE_URL"] + " is unreachable.")
+            raise Exception(holdings_url + " is unreachable.")
 
         # get the "file" tags
         files = bs.select("file")
@@ -117,9 +117,9 @@ def get_completed_gets(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise Exception(ET_Settings["ET_RETRIEVAL_URL"] + " is unreachable.")
-        # get the first table from beautiful soup
-        table = bs.find_all("table")[0]
+            raise Exception(retrieval_url + " is unreachable.")
+        # get the 2nd table from beautiful soup
+        table = bs.find_all("table")[1]
         # check that a table has been found - there might be a slight
         # synchronisation difference between jdma_transfer and jdma_monitor
         # i.e. the entry might be in the database but not updated on the
@@ -177,7 +177,7 @@ def get_completed_deletes(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise Exception(ET_Settings["ET_ROLE_URL"] + " is unreachable.")
+            raise Exception(holdings_url + " is unreachable.")
         # if the dr.migration.external_id is not in the list of batches
         # then the delete has completed
         batches = bs.select("batch")

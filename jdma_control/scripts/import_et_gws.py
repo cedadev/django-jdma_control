@@ -119,9 +119,9 @@ def exit_handler(signal, frame):
     logging.info("Stopping import_et_gws")
     sys.exit(0)
 
-def run():
+def run(*args):
     # setup the logging
-    config = read_backend_config("elastictape")
+    config = read_backend_config("import_et_gws")
     logging.basicConfig(
         format=get_logging_format(),
         level="INFO",
@@ -136,4 +136,20 @@ def run():
 
     data = get_et_gws_from_url(config["ET_EXPORT_URL"])
 
-    create_user_gws_quotas(data, config)
+    # decide whether to run as a daemon
+    if "daemon" in arg_dict:
+        if arg_dict["daemon"].lower() == "true":
+            daemon = True
+        else:
+            daemon = False
+    else:
+        daemon = False
+
+    # run as a daemon or one shot
+    if daemon:
+        # loop this indefinitely until the exit signals are triggered
+        while True:
+            create_user_gws_quotas(data, config)
+            sleep(int(config["RUN_EVERY"]))
+    else:
+        create_user_gws_quotas(data, config)

@@ -301,6 +301,7 @@ class MigrationRequest(models.Model):
     DELETE_COMPLETED=204
 
     FAILED=1000
+    FAILED_COMPLETED=1001
 
     REQ_STAGE_CHOICES = ((PUT_START, 'PUT_START'),
                          (PUT_BUILDING, 'PUT_BUILDING'),
@@ -327,7 +328,8 @@ class MigrationRequest(models.Model):
                          (DELETE_TIDY, 'DELETE_TIDY'),
                          (DELETE_COMPLETED, 'DELETE_COMPLETED'),
 
-                         (FAILED, 'FAILED'))
+                         (FAILED, 'FAILED'),
+                         (FAILED_COMPLETED, 'FAILED_COMPLETED'))
 
     REQ_STAGE_LIST = {PUT_START : 'PUT_START',
                       PUT_BUILDING : 'PUT_BUILDING',
@@ -354,7 +356,8 @@ class MigrationRequest(models.Model):
                       DELETE_TIDY : 'DELETE_TIDY',
                       DELETE_COMPLETED : 'DELETE_COMPLETED',
 
-                      FAILED : 'FAILED'}
+                      FAILED : 'FAILED',
+                      FAILED_COMPLETED : 'FAILED_COMPLETED'}
 
     stage = models.IntegerField(
         choices=REQ_STAGE_CHOICES,

@@ -260,16 +260,16 @@ def unlock_file_list(file_info_list):
                 ).format(fi[0])
             )
             continue
-        # change the owner of the file
+        # change the owner of the file - doesn't need to be recursive now!
         subprocess.call(
             ["/usr/bin/sudo",
-             "/bin/chown", "-R",
+             "/bin/chown",
              "{}:{}".format(fi[1], fi[2]),
              fi[0]])
-        # change the permissions of the file
+        # change the permissions of the file - doesn't need to be recursive!
         subprocess.call(
             ["/usr/bin/sudo",
-             "/bin/chmod", "-R",
+             "/bin/chmod",
              "{}".format(fi[3]),
              fi[0]]
         )
@@ -470,6 +470,7 @@ def DELETE_tidy(backend_object, config):
             )
             # loop over these requests and act on the stage of that request
             for pr in put_reqs:
+                pr.lock()
                 # switch on the stage of the associate request
                 if (pr.stage > MigrationRequest.PUT_PACKING and
                     pr.stage < MigrationRequest.PUT_COMPLETED):
@@ -481,6 +482,7 @@ def DELETE_tidy(backend_object, config):
                     remove_verification_files(backend_object, pr)
                 if pr.stage < MigrationRequest.PUT_TIDY:
                     unlock_original_files(backend_object, pr, config)
+                pr.unlock()
 
             # get the associate GET requests - there could be many or none
             get_reqs = MigrationRequest.objects.filter(
@@ -492,8 +494,10 @@ def DELETE_tidy(backend_object, config):
             for gr in get_reqs:
                 if (gr.stage > MigrationRequest.GET_PENDING and
                     gr.stage < MigrationRequest.GET_COMPLETED):
+                    pr.lock()
                     # remove the temporary staged archive files
                     remove_archive_files(backend_object, gr)
+                    pr.unlock()
 
             # update the request to DELETE_COMPLETED
             dr.stage = MigrationRequest.DELETE_COMPLETED
@@ -635,6 +639,14 @@ def FAILED_completed(backend_object, config):
             if fr.locked:
                 unlock_original_files(backend_object, fr, config)
                 fr.unlock()
+                # transition to FAILED_COMPLETED
+                fr.stage = MigrationRequest.FAILED_COMPLETED
+                fr.save()
+
+                # log
+                logging.info((
+                    "Transition: request ID: {} external ID: {}: FAILED->FAILED_COMPLETED"
+                ).format(fr.pk, fr.migration.external_id))
         except Exception as e:
             logging.error("FAILED: error in FAILED_completed {}".format(str(e)))
 
