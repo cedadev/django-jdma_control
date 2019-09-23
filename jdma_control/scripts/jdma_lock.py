@@ -177,7 +177,7 @@ def lock_put_migration(pr, config):
             # some files may type of "MISS", as they are not found
             # we don't want to add these to the migrations
             if fileinfo.ftype == "MISS":
-                logging.info(
+                logging.debug(
                     "PUT: Skipping file: {} in archive: {} as it is not found".format(
                                 mig_file.path, mig_file.archive.name())
                     )
@@ -238,7 +238,7 @@ def lock_put_migration(pr, config):
                 mig_file.archive.size = current_size
                 # save the Migration File
                 mig_file.save()
-                logging.info("PUT: Added file: {} to archive: {}".format(
+                logging.debug("PUT: Added file: {} to archive: {}".format(
                                mig_file.path, mig_file.archive.name()
                             ))
         # save the migration archive

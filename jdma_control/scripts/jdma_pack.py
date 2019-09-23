@@ -36,7 +36,7 @@ def pack_archive(request_staging_dir, archive, pr):
         pass
     # create the tar file
     tar_file = TarFile(tar_file_path, mode='w')
-    logging.info((
+    logging.debug((
         "Created TarFile archive file: {}"
     ).format(tar_file_path))
 
@@ -48,7 +48,7 @@ def pack_archive(request_staging_dir, archive, pr):
         # be added
         if not(os.path.isdir(mp[0])):
             tar_file.add(mp[0], arcname=mp[1])
-            logging.info((
+            logging.debug((
                 "    Adding file to TarFile archive: {}"
             ).format(mp[0]))
 
@@ -69,7 +69,7 @@ def pack_archives(archive_list, q):
             pass
         # create the tar file
         tar_file = TarFile(tar_file_path, mode='w')
-        logging.info((
+        logging.debug((
             "Created TarFile archive file: {}"
         ).format(tar_file_path))
 
@@ -81,7 +81,7 @@ def pack_archives(archive_list, q):
             # be added
             if not(os.path.isdir(mp[0])):
                 tar_file.add(mp[0], arcname=mp[1])
-                logging.info((
+                logging.debug((
                     "    Adding file to TarFile archive: {}"
                 ).format(mp[0]))
         tar_file.close()
@@ -254,7 +254,7 @@ def unpack_archive(archive_staging_dir, archive, external_id,
                     tar_file.extract(tar_info, path=target_path)
             else:
                 tar_file.extract(tar_info, path=target_path)
-            logging.info((
+            logging.debug((
                 "    Extracting file: {} from archive: {} to directory: {}"
             ).format(tar_info.name, archive.get_id(), target_path))
         except Exception as e:

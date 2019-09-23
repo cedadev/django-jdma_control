@@ -178,7 +178,7 @@ def remove_archive_files(backend_object, pr):
     # remove the directory
     if os.path.isdir(archive_dir):
         shutil.rmtree(archive_dir)
-        logging.info("Deleting archive directory " + archive_dir)
+        logging.debug("Deleting archive directory " + archive_dir)
     else:
         logging.error("Cannot find archive directory " + archive_dir)
 
@@ -194,7 +194,7 @@ def remove_verification_files(backend_object, pr):
     # remove the directory
     if os.path.isdir(verify_dir):
         shutil.rmtree(verify_dir)
-        logging.info("Deleting verify directory " + verify_dir)
+        logging.debug("Deleting verify directory " + verify_dir)
     else:
         logging.error("Cannot find verify directory " + verify_dir)
 
@@ -207,7 +207,7 @@ def remove_original_file_list(filelist):
             # delete the whole directory!
             try:
                 shutil.rmtree(fd)
-                logging.info((
+                logging.debug((
                     "Deleting directory {}"
                 ).format(fd))
             except Exception as e:
@@ -217,7 +217,7 @@ def remove_original_file_list(filelist):
         else:
             try:
                 os.unlink(fd)
-                logging.info((
+                logging.debug((
                     "Deleting file {}"
                 ).format(fd))
             except Exception as e:

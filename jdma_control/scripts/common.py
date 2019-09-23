@@ -113,7 +113,7 @@ def restore_owner_and_group(mig, target_path):
 
             # if it's a directory then recreate the directory
             if mig_file.ftype == "DIR":
-                logging.info(
+                logging.debug(
                     "Created directory: {}".format(
                     file_path
                 ))
@@ -131,7 +131,7 @@ def restore_owner_and_group(mig, target_path):
                 # remove the symlink if it exists
                 try:
                     os.symlink(ln_src_path, ln_tgt_path)
-                    logging.info(
+                    logging.debug(
                         "Created symlink from {} to {}".format(
                         ln_src_path, ln_tgt_path
                     )
@@ -140,7 +140,7 @@ def restore_owner_and_group(mig, target_path):
                     if e.errno == os.errno.EEXIST:
                         os.unlink(ln_tgt_path)
                         os.symlink(ln_src_path, ln_tgt_path)
-                        logging.info(
+                        logging.debug(
                             "Deleted then created symlink from {} to {}".format(
                                 ln_src_path, ln_tgt_path
                             )
@@ -172,7 +172,7 @@ def restore_owner_and_group(mig, target_path):
                      str(mig_file.unix_permission),
                      file_path]
                 )
-                logging.info(
+                logging.debug(
                     "Changed owner and file permissions for file {}".format(
                         file_path
                     )

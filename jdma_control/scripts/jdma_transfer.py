@@ -85,7 +85,7 @@ def upload(backend_object, credentials, pr):
                         # get the list of files for this archive
                         file_list = archive.get_file_names(prefix)['FILE']
                     # log message
-                    logging.info((
+                    logging.debug((
                         "Uploading files: {} to {}"
                     ).format(file_list, backend_object.get_name()))
                     # upload objects in filelist
@@ -113,7 +113,7 @@ def upload(backend_object, credentials, pr):
                         archive_files = archive.get_file_names(prefix)['FILE']
                     file_list.extend(archive_files)
                 # log message
-                logging.info((
+                logging.debug((
                     "Uploading files: {} to {}"
                 ).format(file_list, backend_object.get_name()))
                 # Upload filelist
@@ -190,7 +190,7 @@ def verify(backend_object, credentials, pr):
                 archive_files = archive.get_file_names()['FILE']
             file_list.extend(archive_files)
 
-        logging.info((
+        logging.debug((
             "Downloading files to verify: {} from {}"
         ).format(file_list, backend_object.get_name()))
 
@@ -270,7 +270,7 @@ def download(backend_object, credentials, gr):
             # if piecewise then download bit by bit, otherwise add to file_list
             # and download at the end
             if backend_object.piecewise():
-                logging.info((
+                logging.debug((
                     "Downloading files: {} from {} to {}"
                 ).format(
                     filt_file_list,
@@ -288,7 +288,7 @@ def download(backend_object, credentials, gr):
                 file_list.extend(filt_file_list)
         # Download all if not piecewise
         if not backend_object.piecewise():
-            logging.info((
+            logging.debug((
                 "Downloading files: {} from {} to {}"
             ).format(
                 file_list,
@@ -477,7 +477,7 @@ def delete(backend_object, credentials, dr):
         dr.stage = MigrationRequest.DELETING
         dr.migration.save()
         dr.save()
-        logging.info((
+        logging.debug((
             "Deleting batch: {} from {}"
         ).format(dr.migration.external_id, backend_object.get_name()))
 
