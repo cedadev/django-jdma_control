@@ -90,6 +90,10 @@ def restore_owner_and_group(mig, target_path):
     st_arch = 0
     n_arch = mig.migrationarchive_set.count()
     archive_set = mig.migrationarchive_set.order_by('pk')
+    logging.info(
+        "Changing owner and file permissions on migration {} {}".format(
+        mig.pk, mig.label
+    ))
     for arch_num in range(st_arch, n_arch):
         # determine which archive to change the permissions for
         archive = archive_set[arch_num]

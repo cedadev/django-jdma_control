@@ -273,6 +273,11 @@ def unlock_file_list(file_info_list):
              "{}".format(fi[3]),
              fi[0]]
         )
+        logging.debug(
+            "Changed owner and file permissions for file {}".format(
+                fi[0]
+            )
+
 
 def unlock_original_files(backend_object, pr, config):
     """Restore the uid:gid and permissions on the original files.
@@ -284,6 +289,11 @@ def unlock_original_files(backend_object, pr, config):
     n_arch = archive_set.count()
     common_path = pr.migration.common_path
     file_info_list = []
+    logging.info(
+        "Changing owner and file permissions on migration {} {}".format(
+        pr.migration.pk, pr.migration.label
+    ))
+
     for arch_num in range(st_arch, n_arch):
         # determine which archive to stage (tar) and upload
         archive = archive_set[arch_num]
