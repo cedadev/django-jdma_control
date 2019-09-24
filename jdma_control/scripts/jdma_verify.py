@@ -52,7 +52,6 @@ def verify_list_of_files(list_of_files, pr):
                     "VERIFY: file or archive {} has a different digest."
                 ).format(file_info[0])
                 mark_migration_failed(pr, failure_reason)
-                return
         except Exception as e:
             # check the file exists - if it doesn't then set the stage to
             # FAILED and write that the file couldn't be found in the
@@ -61,7 +60,6 @@ def verify_list_of_files(list_of_files, pr):
                 "VERIFY: file or archive {} failed: {}"
             ).format(file_info[0], str(e))
             mark_migration_failed(pr, failure_reason)
-            return
 
 
 def verify(backend_object, pr, config):
