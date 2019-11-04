@@ -589,7 +589,7 @@ class MigrationRequestView(View):
                     storage_name, credentials
                 )
                 if backend_error is not None:
-                    return backend_error
+                    return HttpError(error_data)
 
                 # create a connection to the backend using the credentials
                 conn = JDMA_BACKEND_OBJECT.create_connection(
@@ -816,6 +816,7 @@ class MigrationRequestView(View):
                     data["storage"],
                     credentials
                 )
+
                 if backend_error is not None:
                     return backend_error
 
@@ -830,6 +831,8 @@ class MigrationRequestView(View):
                         "to the groupworkspace: {}"
                     ).format(data["storage"], data["workspace"])
                     return HttpError(error_data, status=404)
+
+
 
                 # create a connection to the backend using the credentials
                 conn = JDMA_BACKEND_OBJECT.create_connection(
