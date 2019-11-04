@@ -139,7 +139,7 @@ def run(*args):
     data = get_et_gws_from_url(config["ET_EXPORT_URL"])
 
     # decide whether to run as a daemon
-    art_dict = split_args(args)
+    arg_dict = split_args(args)
     if "daemon" in arg_dict:
         if arg_dict["daemon"].lower() == "true":
             daemon = True
