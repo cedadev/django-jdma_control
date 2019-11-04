@@ -276,7 +276,7 @@ def unlock_file_list(file_info_list):
         logging.debug(
             "Changed owner and file permissions for file {}".format(
                 fi[0]
-            )
+            ))
 
 
 def unlock_original_files(backend_object, pr, config):
