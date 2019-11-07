@@ -116,6 +116,9 @@ class Backend(object):
         storage device?"""
         raise NotImplementedError
 
+    def user_has_list_permission(self, username, workspace):
+        return self._user_has_get_permission(username, workspace)
+
     def _user_has_get_permission(self, username, workspace):
         """Does the user have permission to get a migration request from the
         storage device? This is a base example, can be overridden and also just

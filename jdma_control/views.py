@@ -376,14 +376,17 @@ class MigrationRequestView(View):
                    ]
         """
         # if the user name isn't in the request then reject
-        if "name" not in request.GET:
+        if "name" in request.GET:
+            name = request.GET.get("name")
+        else:
             return HttpError({"error": "No name supplied."})
 
+        keyargs = {}
+
         # return details of a single request
-        if "name" in request.GET and "request_id" in request.GET:
+        if "request_id" in request.GET:
             # get the keywords
-            keyargs = {"pk": int(request.GET.get("request_id")),
-                       "user__name": request.GET.get("name")}
+            keyargs["pk"] = int(request.GET.get("request_id"))
 
             try:
                 req = MigrationRequest.objects.get(**keyargs)
@@ -391,11 +394,24 @@ class MigrationRequestView(View):
                 # return error as easily interpreted JSON
                 error_data = {"error": "Request not found.",
                               "request_id": keyargs["pk"],
-                              "name": keyargs["user__name"]}
+                              "name": name}
                 return HttpError(error_data)
 
+            # check that this user can list requests in this workspace
+            generic_backend = jdma_control.backends.Backend.Backend()
+            if not generic_backend.user_has_list_permission(
+                username = name,
+                workspace = req.migration.workspace.workspace
+            ):
+                error_data = {"error": "User does not have permission to list requests in the workspace",
+                               "workspace": req.migration.workspace.workspace,
+                               "name": name
+                             }
+                return HttpError(error_data, status=403)
+
             # full details - these are all the required fields
-            data = {"request_id": req.id, "user": req.user.name,
+            data = {"request_id": req.id,
+                    "user": req.user.name,
                     "request_type": req.request_type,
                     "migration_id": req.migration.pk,
                     "label": req.migration.label,
@@ -414,20 +430,61 @@ class MigrationRequestView(View):
                     req.failure_reason != ""):
                 data["failure_reason"] = req.failure_reason
         else:
+            if "workspace" in request.GET:
+                workspace = request.GET.get("workspace")
+                # get the workspace object
+                gws = Groupworkspace.objects.filter(workspace=workspace)
+                if len(gws) == 0:
+                    error_data = {"error": "Workspace not found.",
+                                  "name": name}
+                    error_data["workspace"] = workspace
+                    return HttpError(error_data)
+                else:
+                    keyargs["migration__workspace"] = gws[0]
+            else:
+                workspace = None
+
+            # check whether the filter is `user` or `workspace` and whether this
+            # user has permission to list the workspace
+            if "filter" in request.GET:
+                ffilter = request.GET.get("filter")
+                if ffilter == "workspace":
+                    # check workspace supplied
+                    if workspace is None:
+                        error_data = {"error": "No workspace supplied and filter=workspace.",
+                                      "name": name}
+                        return HttpError(error_data)
+
+                    # check the user has permission to list the batches
+                    generic_backend = jdma_control.backends.Backend.Backend()
+                    if not generic_backend.user_has_list_permission(
+                        username = name,
+                        workspace = workspace
+                    ):
+                        error_data = {"error": "User does not have permission to list requests in the workspace",
+                                       "workspace": workspace,
+                                       "name": name
+                                     }
+                        return HttpError(error_data, status=403)
+                else:
+                    keyargs["user__name"] = name
+            else:
+                keyargs["user__name"] = name
+
             # return details of all the migration requests for this user
-            keyargs = {"user__name": request.GET.get("name")}
             try:
                 reqs = MigrationRequest.objects.filter(**keyargs).order_by('pk')
             except Exception:
                 # return error as easily interpreted JSON
-                error_data = {"error": "Request not found.",
-                              "name": keyargs["user__name"]}
+                error_data = {"error": "Requests not found.",
+                              "name": keyargs}
                 return HttpError(error_data)
 
             # loop over the requests and add to the data at the end
             requests = []
             for r in reqs:
-                req_data = {"request_id": r.pk, "user": r.user.name,
+                req_data = {"request_id": r.pk,
+                            "user": r.user.name,
                             "request_type": r.request_type,
                             "migration_id": r.migration.pk,
                             "label": r.migration.label,
@@ -745,15 +802,16 @@ class MigrationRequestView(View):
                     return HttpError(error_data)
 
                 # check that there is not already an entry with this exact same
-                # filelist
-                # get the first file
-                if MigrationRequest.objects.filter(
+                # filelist - that has not been deleted
+                mr_qs = MigrationRequest.objects.filter(
                     filelist=data["filelist"],
-                    stage__lt=MigrationRequest.DELETE_COMPLETED
-                ):
+                    migration__stage__lt=Migration.DELETED
+                )
+                # get the first file
+                if len(mr_qs) > 0:
                     error_data["error"] = (
-                        "Filelist or directory {}... is already in a migration"
-                    ).format(data["filelist"][0])
+                        "Filelist or directory {}... is already in a migration {}"
+                    ).format(data["filelist"][0], mr_qs)
                     return HttpError(error_data, status=403)
 
                 # check for the label in the request - if not then derive from
@@ -1011,8 +1069,17 @@ class MigrationView(View):
     def get(self, request, *args, **kwargs):
         """:rest-api"""
         # if the user name isn't in the request then reject
-        if "name" not in request.GET:
+        if "name" in request.GET:
+            name = request.GET.get("name")
+        else:
             return HttpError({"error": "No name supplied."})
+
+        if "workspace" in request.GET:
+            workspace = request.GET.get("workspace")
+        else:
+            workspace = None
+
+        keyargs = {}
 
         # return details of a single batch
         if ("migration_id" in request.GET or
@@ -1020,35 +1087,19 @@ class MigrationView(View):
             # get the keywords
             if "migration_id" in request.GET:
                 migration_id = int(request.GET.get("migration_id"))
-                keyargs = {"pk": migration_id,
-                           "user__name": request.GET.get("name")}
+                keyargs["pk"] = migration_id
                 label_id = None
             elif "label" in request.GET:
                 label_id = request.GET.get("label")
-                keyargs = {"label": label_id,
-                           "user__name": request.GET.get("name")}
+                keyargs["label"] =  label_id
                 migration_id = None
-            if "workspace" in request.GET:
-                workspace = request.GET.get("workspace")
-                # get the workspace object
-                gws = Groupworkspace.objects.filter(workspace=workspace)
-                if len(gws) == 0:
-                    error_data = {"error": "Workspace not found.",
-                                  "migration_id": keyargs["pk"],
-                                  "name": keyargs["user__name"]}
-                    error_data["workspace"] = workspace
-                    return HttpError(error_data)
-                else:
-                    keyargs["workspace"] = gws[0]
-            else:
-                workspace = None
 
             try:
                 migration = Migration.objects.get(**keyargs)
             except Exception:
                 # return error as easily interpreted JSON
                 error_data = {"error": "Batch not found.",
-                              "name": keyargs["user__name"]}
+                              "name": name}
 
                 if migration_id:
                     error_data["migration_id"] = migration_id
@@ -1060,6 +1111,19 @@ class MigrationView(View):
                     error_data["workspace"] = workspace
 
                 return HttpError(error_data)
+
+            # check that this user can list batches in this workspace
+            generic_backend = jdma_control.backends.Backend.Backend()
+            if not generic_backend.user_has_list_permission(
+                username = name,
+                workspace = migration.workspace.workspace
+            ):
+                error_data = {"error": "User does not have permission to view batches in the workspace",
+                               "workspace": migration.workspace.workspace,
+                               "name": name
+                             }
+                return HttpError(error_data, status=403)
+
 
             # full details - these are all the required fields
             data = {"migration_id": migration.id,
@@ -1076,23 +1140,50 @@ class MigrationView(View):
             if migration.registered_date:
                 data["registered_date"] = migration.registered_date.isoformat()
         else:
-            # return details of all the migrations for this user
-            keyargs = {"user__name": request.GET.get("name")}
             if "workspace" in request.GET:
                 workspace = request.GET.get("workspace")
                 # get the workspace object
-                gws = Groupworkspace.objects.filter(workspace=workspace).order_by('pk')
+                gws = Groupworkspace.objects.filter(workspace=workspace)
                 if len(gws) == 0:
                     error_data = {"error": "Workspace not found.",
-                                  "name": keyargs["user__name"]}
+                                  "name": name}
                     error_data["workspace"] = workspace
                     return HttpError(error_data)
                 else:
                     keyargs["workspace"] = gws[0]
             else:
                 workspace = None
+
+            # two modes of listing the batches: `user` and `workspace`
+            # if workspace is selected then a workspace must be supplied
+            # and the user must have permission to list that workspace
+            if "filter" in request.GET:
+                ffilter = request.GET.get("filter")
+                if ffilter == "workspace":
+                    # check workspace supplied
+                    if workspace is None:
+                        error_data = {"error": "No workspace supplied and filter=workspace.",
+                                      "name": name}
+                        return HttpError(error_data)
+
+                    # check the user has permission to list the batches
+                    generic_backend = jdma_control.backends.Backend.Backend()
+                    if not generic_backend.user_has_list_permission(
+                        username = name,
+                        workspace = workspace
+                    ):
+                        error_data = {"error": "User does not have permission to view batches in the workspace",
+                                       "workspace": workspace,
+                                       "name": name
+                                     }
+                        return HttpError(error_data, status=403)
+                else:
+                    keyargs["user__name"] = name
+            else:
+                keyargs["user__name"] = name
+
             try:
-                migs = Migration.objects.filter(**keyargs)
+                migs = Migration.objects.filter(**keyargs).order_by('pk')
             except Exception:
                 # return error as easily interpreted JSON
                 error_data = {"error": "Batches not found.",
@@ -1104,7 +1195,8 @@ class MigrationView(View):
             # loop over the requests and add to the data at the end
             migrations = []
             for m in migs:
-                mig_data = {"migration_id": m.pk, "user": m.user.name,
+                mig_data = {"migration_id": m.pk,
+                            "user": m.user.name,
                             "workspace": m.workspace.workspace,
                             "label": m.label,
                             "stage": m.stage,
@@ -1209,10 +1301,9 @@ class MigrationFileView(View):
             mig_id = int(request.GET.get("migration_id"))
         else:
             mig_id = None
+
         user_name = request.GET.get("name")
-        # get the keywords
-        # keyargs = {"pk": int(request.GET.get("migration_id")),
-        #            "user__name": request.GET.get("name")}
+
         if "workspace" in request.GET:
             workspace = Groupworkspace.objects.filter(
                 workspace=request.GET.get("workspace")
@@ -1221,18 +1312,49 @@ class MigrationFileView(View):
             workspace = None
 
         # build the keyargs
-        keyargs = {"user__name": request.GET.get("name")}
+        keyargs = {}
+
+        generic_backend = jdma_control.backends.Backend.Backend()
         if mig_id != None:
             keyargs["pk"] = mig_id
+            try:
+                migration = Migration.objects.get(pk=mig_id)
+            except:
+                # return error as easily interpreted JSON
+                error_data = {"error": "Batch not found.",
+                              "migration_id": mig_id,
+                              "name": user_name}
+                if workspace:
+                    error_data["workspace"] = workspace.workspace
+                return HttpError(error_data)
+
+            # check that this user can list this migration in this workspace
+            if not generic_backend.user_has_list_permission(
+                username = user_name,
+                workspace = migration.workspace.workspace
+            ):
+                error_data = {"error": "User does not have permission to view batches in the workspace",
+                               "workspace":  migration.workspace.workspace,
+                               "name": user_name
+                             }
+                return HttpError(error_data, status=403)
+
         if workspace != None:
             keyargs["workspace"] = workspace
 
         try:
             # get the migrations
             mig_data = []
-            migrations = Migration.objects.filter(**keyargs)
+            migrations = Migration.objects.filter(**keyargs).order_by('pk')
             # loop over the migrations and build the data
             for mig in migrations:
+                # check that this user can list this migration in this workspace
+                if not generic_backend.user_has_list_permission(
+                    username = user_name,
+                    workspace = mig.workspace.workspace
+                ):
+                    continue
+
                 mig_data_local = {"migration_id" : mig.id,
                                   "user" : mig.user.name,
                                   "workspace" : mig.workspace.workspace,
@@ -1283,7 +1405,6 @@ class MigrationFileView(View):
                           "name": user_name}
             if workspace:
                 error_data["workspace"] = workspace.workspace
-            raise Exception(e)
             return HttpError(error_data)
 
         return HttpResponse(json.dumps(data), content_type="application/json")
@@ -1328,18 +1449,50 @@ class MigrationArchiveView(View):
             workspace = None
 
         # build the keyargs
-        keyargs = {"user__name": request.GET.get("name")}
+        keyargs = {}
+
+        generic_backend = jdma_control.backends.Backend.Backend()
+
         if mig_id != None:
             keyargs["pk"] = mig_id
+            try:
+                migration = Migration.objects.get(pk=mig_id)
+            except:
+                # return error as easily interpreted JSON
+                error_data = {"error": "Batch not found.",
+                              "migration_id": mig_id,
+                              "name": user_name}
+                if workspace:
+                    error_data["workspace"] = workspace.workspace
+                return HttpError(error_data)
+
+            # check that this user can list this migration in this workspace
+            if not generic_backend.user_has_list_permission(
+                username = user_name,
+                workspace = migration.workspace.workspace
+            ):
+                error_data = {"error": "User does not have permission to view batches in the workspace",
+                               "workspace":  migration.workspace.workspace,
+                               "name": user_name
+                             }
+                return HttpError(error_data, status=403)
+
         if workspace != None:
             keyargs["workspace"] = workspace
 
         try:
             # get the migrations
             mig_data = []
-            migrations = Migration.objects.filter(**keyargs)
+            migrations = Migration.objects.filter(**keyargs).order_by('pk')
             # loop over the migrations and build the data
             for mig in migrations:
+                # check that this user can list this migration in this workspace
+                if not generic_backend.user_has_list_permission(
+                    username = user_name,
+                    workspace = mig.workspace.workspace
+                ):
+                    continue
+                    
                 mig_data_local = {"migration_id" : mig.id,
                                   "user" : mig.user.name,
                                   "workspace" : mig.workspace.workspace,
