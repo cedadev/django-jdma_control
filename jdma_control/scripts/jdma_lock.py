@@ -16,6 +16,7 @@ import subprocess
 from operator import attrgetter
 import signal, sys
 from time import sleep, time
+import random
 from multiprocessing import Process, Queue
 
 from django.db.models import Q
@@ -444,6 +445,6 @@ def run(*args):
         # loop this indefinitely until the exit signals are triggered
         while True:
             run_loop(backend, config)
-            sleep(5)
+            sleep(5 + random.random())
     else:
         run_loop(backend, config)

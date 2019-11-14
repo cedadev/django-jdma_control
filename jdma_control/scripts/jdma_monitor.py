@@ -15,6 +15,7 @@ from django.db.models import Q
 import signal
 import sys
 from time import sleep
+import random
 
 import jdma_control.backends
 import jdma_site.settings as settings
@@ -205,6 +206,6 @@ def run(*args):
         # loop this indefinitely until the exit signals are triggered
         while True:
             run_loop(backend)
-            sleep(5)
+            sleep(5 + random.random())
     else:
         run_loop(backend)

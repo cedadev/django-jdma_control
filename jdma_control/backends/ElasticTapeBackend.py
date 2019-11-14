@@ -70,7 +70,7 @@ def get_completed_puts(backend_object):
             state = f.find("current_state").text.strip()
             file_path = f.find("file_name").text.strip()
             # state is SYNCED for completed PUT transfers
-            if state == "SYNCED" or state == "CACHED_SYNCED":
+            if state in ["SYNCED", "CACHED_SYNCED", "TAPED"]:
                 n_synced += 1
 
         # get the total number of files in all the archives

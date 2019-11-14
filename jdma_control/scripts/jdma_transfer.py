@@ -12,6 +12,7 @@ from tarfile import TarFile
 import signal
 import sys
 from time import sleep
+import random
 
 from django.db.models import Q
 
@@ -653,6 +654,7 @@ def run(*args):
         # loop this indefinitely until the exit signals are triggered
         while True:
             run_loop(backend_objects)
-            sleep(5)
+            # add a random amount of time to prevent(?) race conditions
+            sleep(5 + random.random())
     else:
         run_loop(backend_objects)

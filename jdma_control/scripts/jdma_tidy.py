@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import signal,sys
 from time import sleep
+import random
 import datetime
 from multiprocessing import Process
 
@@ -730,6 +731,6 @@ def run(*args):
         # loop this indefinitely until the exit signals are triggered
         while True:
             run_loop(backend, config)
-            sleep(5)
+            sleep(5 + random.random())
     else:
         run_loop(backend, config)
