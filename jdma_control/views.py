@@ -403,7 +403,7 @@ class MigrationRequestView(View):
                 username = name,
                 workspace = req.migration.workspace.workspace
             ):
-                error_data = {"error": "User does not have permission to list requests in the workspace",
+                error_data = {"error": "User does not have permission to view requests in the workspace",
                                "workspace": req.migration.workspace.workspace,
                                "name": name
                              }
@@ -438,7 +438,7 @@ class MigrationRequestView(View):
                     error_data = {"error": "Workspace not found.",
                                   "name": name}
                     error_data["workspace"] = workspace
-                    return HttpError(error_data)
+                    return HttpError(error_data, status=404)
                 else:
                     keyargs["migration__workspace"] = gws[0]
             else:
@@ -1282,7 +1282,9 @@ class MigrationFileView(View):
     def get(self, request, *args, **kwargs):
         """:rest-api"""
         # if the user name isn't in the request then reject
-        if "name" not in request.GET:
+        if "name" in request.GET:
+            user_name = request.GET.get("name")
+        else:
             return HttpError({"error": "No name supplied."})
 
         # get the limit
@@ -1302,19 +1304,25 @@ class MigrationFileView(View):
         else:
             mig_id = None
 
-        user_name = request.GET.get("name")
-
-        if "workspace" in request.GET:
-            workspace = Groupworkspace.objects.filter(
-                workspace=request.GET.get("workspace")
-            )[0]
-        else:
-            workspace = None
-
         # build the keyargs
         keyargs = {}
 
+        if "workspace" in request.GET:
+            workspace = request.GET.get("workspace")
+            # get the workspace object
+            gws = Groupworkspace.objects.filter(workspace=workspace)
+            if len(gws) == 0:
+                error_data = {"error": "Workspace not found.",
+                              "name": user_name}
+                error_data["workspace"] = workspace
+                return HttpError(error_data,status=404)
+            else:
+                keyargs["workspace"] = gws[0]
+        else:
+            workspace = None
+
         generic_backend = jdma_control.backends.Backend.Backend()
+
         if mig_id != None:
             keyargs["pk"] = mig_id
             try:
@@ -1333,14 +1341,38 @@ class MigrationFileView(View):
                 username = user_name,
                 workspace = migration.workspace.workspace
             ):
-                error_data = {"error": "User does not have permission to view batches in the workspace",
+                error_data = {"error": "User does not have permission to view files in the workspace",
                                "workspace":  migration.workspace.workspace,
                                "name": user_name
                              }
                 return HttpError(error_data, status=403)
+        else:
+            # check whether the filter is `user` or `workspace` and whether this
+            # user has permission to list the workspace
+            if "filter" in request.GET:
+                ffilter = request.GET.get("filter")
+                if ffilter == "workspace":
+                    # check workspace supplied
+                    if workspace is None:
+                        error_data = {"error": "No workspace supplied and filter=workspace.",
+                                      "name": user_name}
+                        return HttpError(error_data)
 
-        if workspace != None:
-            keyargs["workspace"] = workspace
+                    # check the user has permission to list the batches
+                    generic_backend = jdma_control.backends.Backend.Backend()
+                    if not generic_backend.user_has_list_permission(
+                        username = user_name,
+                        workspace = workspace
+                    ):
+                        error_data = {"error": "User does not have permission to list requests in the workspace",
+                                       "workspace": workspace,
+                                       "name": user_name
+                                     }
+                        return HttpError(error_data, status=403)
+                else:
+                    keyargs["user__name"] = user_name
+            else:
+                keyargs["user__name"] = user_name
 
         try:
             # get the migrations
@@ -1421,14 +1453,18 @@ class MigrationArchiveView(View):
     def get(self, request, *args, **kwargs):
         """:rest-api"""
         # if the user name isn't in the request then reject
-        if "name" not in request.GET:
+        if "name" in request.GET:
+            user_name = request.GET.get("name")
+        else:
             return HttpError({"error": "No name supplied."})
+
         # get the limit
         if "limit" in request.GET:
             limit = int(request.GET.get("limit"))
         else:
             limit = 0
 
+        # get whether the digest should be returned
         if "digest" in request.GET:
             digest = True
         else:
@@ -1439,17 +1475,23 @@ class MigrationArchiveView(View):
             mig_id = int(request.GET.get("migration_id"))
         else:
             mig_id = None
-        user_name = request.GET.get("name")
-
-        if "workspace" in request.GET:
-            workspace = Groupworkspace.objects.filter(
-                workspace=request.GET.get("workspace")
-            )[0]
-        else:
-            workspace = None
 
         # build the keyargs
         keyargs = {}
+
+        if "workspace" in request.GET:
+            workspace = request.GET.get("workspace")
+            # get the workspace object
+            gws = Groupworkspace.objects.filter(workspace=workspace)
+            if len(gws) == 0:
+                error_data = {"error": "Workspace not found.",
+                              "name": user_name}
+                error_data["workspace"] = workspace
+                return HttpError(error_data,status=404)
+            else:
+                keyargs["workspace"] = gws[0]
+        else:
+            workspace = None
 
         generic_backend = jdma_control.backends.Backend.Backend()
 
@@ -1463,22 +1505,46 @@ class MigrationArchiveView(View):
                               "migration_id": mig_id,
                               "name": user_name}
                 if workspace:
-                    error_data["workspace"] = workspace.workspace
-                return HttpError(error_data)
+                    error_data["workspace"] = workspace
+                return HttpError(error_data, status=404)
 
             # check that this user can list this migration in this workspace
             if not generic_backend.user_has_list_permission(
                 username = user_name,
                 workspace = migration.workspace.workspace
             ):
-                error_data = {"error": "User does not have permission to view batches in the workspace",
-                               "workspace":  migration.workspace.workspace,
+                error_data = {"error": "User does not have permission to list archives in the workspace",
+                               "workspace": migration.workspace.workspace,
                                "name": user_name
                              }
                 return HttpError(error_data, status=403)
+        else:
+            # check whether the filter is `user` or `workspace` and whether this
+            # user has permission to list the workspace
+            if "filter" in request.GET:
+                ffilter = request.GET.get("filter")
+                if ffilter == "workspace":
+                    # check workspace supplied
+                    if workspace is None:
+                        error_data = {"error": "No workspace supplied and filter=workspace.",
+                                      "name": user_name}
+                        return HttpError(error_data)
 
-        if workspace != None:
-            keyargs["workspace"] = workspace
+                    # check the user has permission to list the batches
+                    generic_backend = jdma_control.backends.Backend.Backend()
+                    if not generic_backend.user_has_list_permission(
+                        username = user_name,
+                        workspace = workspace
+                    ):
+                        error_data = {"error": "User does not have permission to list requests in the workspace",
+                                       "workspace": workspace,
+                                       "name": user_name
+                                     }
+                        return HttpError(error_data, status=403)
+                else:
+                    keyargs["user__name"] = user_name
+            else:
+                keyargs["user__name"] = user_name
 
         try:
             # get the migrations
@@ -1492,7 +1558,7 @@ class MigrationArchiveView(View):
                     workspace = mig.workspace.workspace
                 ):
                     continue
-                    
+
                 mig_data_local = {"migration_id" : mig.id,
                                   "user" : mig.user.name,
                                   "workspace" : mig.workspace.workspace,
