@@ -47,42 +47,36 @@ def get_completed_puts(backend_object):
         & Q(migration__storage__storage=storage_id)
     )
     for pr in put_reqs:
-        # get a list of synced files for this workspace and user and batch
-        holdings_url = "{}?batch={};workspace={};caller={};level=file".format(
-            ET_Settings["ET_HOLDINGS_URL"],
-            pr.migration.external_id,
-            pr.migration.workspace.workspace,
-            pr.migration.user.name
+        # form the url and get the response, parse the document using bs4
+        holdings_url = "{}?batch={}".format(
+	    ET_Settings["ET_INPUT_BATCH_SUMMARY_URL"], 
+            pr.migration.external_id
         )
-        # use requests to fetch the URL
         r = requests.get(holdings_url)
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
             raise Exception(holdings_url + " is unreachable.")
 
-        # get the "file" tags
-        files = bs.select("file")
-        # count the number of synced files
-        n_synced = 0
-        # loop over these files
-        for f in files:
-            state = f.find("current_state").text.strip()
-            file_path = f.find("file_name").text.strip()
-            # state is SYNCED for completed PUT transfers
-            if state in ["SYNCED", "CACHED_SYNCED", "TAPED"]:
-                n_synced += 1
+        # get the 2nd table - 1st is just a heading table
+        table = bs.find_all("table")[1]
+        if len(table) == 0:
+            return False
 
-        # get the total number of files in all the archives
-        n_archive_files = 0
-        # loop over each archive in the migration
-        archive_set = pr.migration.migrationarchive_set.order_by('pk')
-        for archive in archive_set:
-            # get the list of files for this archive
-            file_list = archive.get_file_names()['FILE']
-            n_archive_files += len(file_list)
-        # compare number synched with number in all archives
-        if n_archive_files == n_synced:
+        # get the first row
+        rows = table.find_all("tr")
+        if len(rows) < 2:
+            return False
+        row_1 = table.find_all("tr")[1]
+
+        # the status is the first column
+        cols = row_1.find_all("td")
+        if len(cols) < 3:
+            return False
+        transfer_id = cols[0].get_text()
+        status = cols[0].get_text()
+        # check for completion
+        if status in ["SYNCED", "TAPED"]:
             completed_PUTs.append(pr.migration.external_id)
 
     return completed_PUTs

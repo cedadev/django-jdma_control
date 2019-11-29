@@ -403,7 +403,7 @@ class MigrationRequestView(View):
                 username = name,
                 workspace = req.migration.workspace.workspace
             ):
-                error_data = {"error": "User does not have permission to view requests in the workspace",
+                error_data = {"error": "User does not have permission to list requests in the workspace",
                                "workspace": req.migration.workspace.workspace,
                                "name": name
                              }
@@ -426,7 +426,8 @@ class MigrationRequestView(View):
                 data["filelist"] = req.filelist
 
             # add the failure reason if failed
-            if (req.stage == MigrationRequest.FAILED and
+            if (req.stage in [MigrationRequest.FAILED,
+                MigrationRequest.FAILED_COMPLETED] and
                     req.failure_reason != ""):
                 data["failure_reason"] = req.failure_reason
         else:
@@ -1364,7 +1365,7 @@ class MigrationFileView(View):
                         username = user_name,
                         workspace = workspace
                     ):
-                        error_data = {"error": "User does not have permission to list requests in the workspace",
+                        error_data = {"error": "User does not have permission to list files in the workspace",
                                        "workspace": workspace,
                                        "name": user_name
                                      }
