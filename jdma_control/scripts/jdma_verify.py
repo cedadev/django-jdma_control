@@ -53,6 +53,7 @@ def verify_list_of_files(list_of_files, pr):
                     "VERIFY: file or archive {} has a different digest."
                 ).format(file_info[0])
                 mark_migration_failed(pr, failure_reason)
+                break
         except Exception as e:
             # check the file exists - if it doesn't then set the stage to
             # FAILED and write that the file couldn't be found in the
@@ -61,14 +62,9 @@ def verify_list_of_files(list_of_files, pr):
                 "VERIFY: file or archive {} failed: {}"
             ).format(file_info[0], str(e))
             mark_migration_failed(pr, failure_reason)
-
+            break
 
 def verify(backend_object, pr, config):
-    # check whether locked
-    if pr.locked:
-        return
-    # lock the migration
-    pr.lock()
     # get the batch id
     external_id = pr.migration.external_id
     # get the temporary directory
@@ -136,9 +132,6 @@ def verify(backend_object, pr, config):
         pr.stage = MigrationRequest.PUT_TIDY
         # reset last archive
         pr.last_archive = 0
-        # unlock
-        pr.locked = False
-        pr.save()
         logging.info((
             "Transition: request ID: {} external ID: {} VERIFYING->PUT_TIDY"
         ).format(pr.pk, pr.migration.external_id))
@@ -157,7 +150,12 @@ def verify_files(backend_object, config):
         & Q(migration__storage__storage=storage_id)
     )
     for pr in put_reqs:
+        if pr.locked:
+            return
+        # lock the migration
+        pr.lock()
         verify(backend_object, pr, config)
+        pr.unlock()
 
 def exit_handler(signal, frame):
     logging.info("Stopping jdma_verify")
