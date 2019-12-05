@@ -117,8 +117,6 @@ def pack_request(pr, archive_staging_dir, config):
         archive_staging_dir,
         pr.migration.get_id()
     )
-    if not (os.path.isdir(request_staging_dir)):
-        os.makedirs(request_staging_dir)
 
     # build the list of archives and files
     for archive in active_archives:
@@ -126,6 +124,9 @@ def pack_request(pr, archive_staging_dir, config):
             archive.digest = "not packed"
             archive.save()
             continue
+
+        if not (os.path.isdir(request_staging_dir)):
+            os.makedirs(request_staging_dir)
 
         # create a path to store the tar file in
         tar_file_path = archive.get_archive_name(prefix=request_staging_dir)
