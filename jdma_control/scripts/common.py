@@ -207,11 +207,12 @@ def restore_owner_and_group(mig, target_path):
 
 def mark_migration_failed(mig_req, failure_reason, e_inst=None, upload_mig=True):
     from jdma_control.models import Migration, MigrationRequest
+    # lock the migration request so it can't be retried
+    if not mig_req.lock():
+        return
     logging.error(failure_reason)
     mig_req.stage = MigrationRequest.FAILED
     mig_req.failure_reason = str(failure_reason)
-    # lock the migration request so it can't be retried
-    mig_req.locked = True
     # only reset these if the upload migration (PUT | MIGRATE) fails
     # if a GET fails then the migration is unaffected
     if upload_mig:

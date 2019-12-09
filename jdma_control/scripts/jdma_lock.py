@@ -277,22 +277,23 @@ def lock_put_migrations(backend_object, config):
     # get the storage id for the backend
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # get the list of PUT requests
-    put_reqs = MigrationRequest.objects.filter(
+    pr = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
+        & Q(locked=False)
         & Q(stage=MigrationRequest.PUT_START)
         & Q(migration__storage__storage=storage_id)
-    )
-    # for each PUT request get the Migration and determine if the type of the
-    # Migration is ON_DISK
-    for pr in put_reqs:
-        # check if locked in the database
-        if pr.locked:
-            continue
-        # lock the migration in the database
-        pr.lock()
-        lock_put_migration(pr, config)
-        pr.unlock()
+    ).first()
+
+    # .first() returns None when no requests that match the filter are found
+    if not pr:
+        return
+    # lock the Migration to prevent other processes acting upon it
+    if not pr.lock():
+        return
+    # carry out the lock migration
+    lock_put_migration(pr, config)
+    pr.unlock()
 
 
 def lock_get_migration(gr):
@@ -325,17 +326,18 @@ def lock_get_migrations(backend_object):
     # get the storage id for the backend
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # get the list of GET requests
-    get_reqs = MigrationRequest.objects.filter(
+    gr = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.GET)
+        & Q(locked=False)
         & Q(stage=MigrationRequest.GET_START)
         & Q(migration__storage__storage=storage_id)
-    )
-    for gr in get_reqs:
-        if gr.locked:
-            continue
-        gr.lock()
-        lock_get_migration(gr)
-        gr.unlock()
+    ).first()
+    if not gr:
+        return
+    if not gr.lock():
+        return
+    lock_get_migration(gr)
+    gr.unlock()
 
 
 def lock_delete_migration(backend_object, dr):
@@ -366,19 +368,18 @@ def lock_delete_migrations(backend_object):
     # get the storage id for the backend
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # get the list of GET requests
-    del_reqs = MigrationRequest.objects.filter(
+    dr = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.DELETE)
+        & Q(locked=False)
         & Q(stage=MigrationRequest.DELETE_START)
         & Q(migration__storage__storage=storage_id)
-    )
-    # set any associated MigrationRequests - i.e. acting on the same Migration
-    # to locked
-    for dr in del_reqs:
-        if dr.locked:
-            continue
-        dr.lock()
-        lock_delete_migration(backend_object, dr)
-        dr.unlock()
+    ).first()
+    if not dr:
+        return
+    if not dr.lock():
+        return
+    lock_delete_migration(backend_object, dr)
+    dr.unlock()
 
 
 def process(backend, config):

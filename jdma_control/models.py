@@ -454,12 +454,25 @@ class MigrationRequest(models.Model):
         )
 
     def lock(self):
-        self.locked = True
-        self.save()
+        # check that the stage isn't changed while we're accessing and waiting
+        # for the db
+        current_stage = self.stage
+        updated = bool(MigrationRequest.objects.
+            filter(pk=self.pk, locked=False).
+            update(locked=True)
+        )
+        self.refresh_from_db()
+        if self.stage != current_stage:
+            return False
+
+        return updated
 
     def unlock(self):
-        self.locked = False
-        self.save()
+        n_updated = (MigrationRequest.objects.
+            filter(pk=self.pk, locked=True).
+            update(locked=False)
+        )
+        return bool(n_updated)
 
     def formatted_filelist(self):
         """Return a string of the filelist separated by linebreaks, rather than

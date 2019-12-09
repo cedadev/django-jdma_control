@@ -90,7 +90,8 @@ def create_user_gws_quotas(data, config):
                                                   line[0])
             # create the new storage quota and assign the workspace
             create_quota_entry(storageid, new_gws, int(line[2]), quota_used)
-
+            # sleep for 100ms to prevent server getting overloaded
+            sleep(0.1)
 
 def get_et_quota_used(url, workspace):
     # This requires interpreting a webpage at url

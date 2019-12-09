@@ -327,67 +327,51 @@ def put_transfers(backend_object, key):
     storage"""
     # get the storage id for the backend object
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
-    # Get the PUT requests for this backend.
+    # Get the first non-locked PUT request for this backend.
     # This involves resolving two foreign keys
-    put_reqs = MigrationRequest.objects.filter(
+    pr = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
+        & Q(locked=False)
         & Q(migration__storage__storage=storage_id)
         & Q(stage__in=[
             MigrationRequest.PUT_PENDING,
-            MigrationRequest.PUTTING,
             MigrationRequest.VERIFY_PENDING,
-            MigrationRequest.VERIFY_GETTING
         ])
-    )
-    # for each PUT request get the Migration and determine the type of the
-    # Migration
-    put_count = 0
-    for pr in put_reqs:
-        # check for lock
-        if pr.locked:
-            continue
-        # lock
-        pr.lock()
-        # determine the credentials for the user - decrypt if necessary
-        if pr.credentials != {}:
-            credentials = AES_tools.AES_decrypt_dict(key, pr.credentials)
-        else:
-            credentials = {}
+    ).first()
 
-        # Check whether data is being put to external storage
-        if pr.stage == MigrationRequest.PUT_PENDING:
-            # create the batch on this instance, next time the script is run
-            # the archives will be created as tarfiles
-            try:
-                upload(backend_object, credentials, pr)
-                put_count += 1
-            except Exception as e:
-                # Something went wrong, set FAILED and failure_reason
-                mark_migration_failed(pr, str(e), e)
-        # between these stages PUT_PACKING occurs in jdma_pack
-        elif pr.stage == MigrationRequest.PUTTING:
-            # in the process of putting - we don't do anything here now!
-            # jdma_monitor script will transition from PUTTING->VERIFY_PENDING
-            pass
-        # check if data is now on external storage and should be pulled
-        # back for verification
-        elif pr.stage == MigrationRequest.VERIFY_PENDING:
-            # pull back the data from the external storage
-            try:
-                put_count += 1
-                verify(backend_object, credentials, pr)
-            except Exception as e:
-                # Something went wrong, set FAILED and failure_reason
-                mark_migration_failed(pr, str(e), e)
+    # .first() returns None when no requests that match the filter are found
+    if not pr:
+        return
+    # lock the Migration to prevent other processes acting upon it
+    if not pr.lock():
+        return
+    # determine the credentials for the user - decrypt if necessary
+    if pr.credentials != {}:
+        credentials = AES_tools.AES_decrypt_dict(key, pr.credentials)
+    else:
+        credentials = {}
 
-        elif pr.stage == MigrationRequest.VERIFY_GETTING:
-            pass
-        elif pr.stage == MigrationRequest.VERIFYING:
-            pass
-        # unlock
-        pr.unlock()
-    return put_count
+    # Check whether data is being put to external storage
+    if pr.stage == MigrationRequest.PUT_PENDING:
+        # create the batch on this instance, next time the script is run
+        # the archives will be created as tarfiles
+        try:
+            upload(backend_object, credentials, pr)
+        except Exception as e:
+            # Something went wrong, set FAILED and failure_reason
+            mark_migration_failed(pr, str(e), e)
+    # check if data is now on external storage and should be pulled
+    # back for verification
+    elif pr.stage == MigrationRequest.VERIFY_PENDING:
+        # pull back the data from the external storage
+        try:
+            verify(backend_object, credentials, pr)
+        except Exception as e:
+            # Something went wrong, set FAILED and failure_reason
+            mark_migration_failed(pr, str(e), e)
+    # unlock
+    pr.unlock()
 
 
 def restore_owner_and_group_on_get(backend_object, gr):
@@ -412,48 +396,44 @@ def get_transfers(backend_object, key):
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
 
     # get the GET requests which are queued (GET_PENDING) for this backend
-    get_reqs = MigrationRequest.objects.filter(
+    gr = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.GET)
+        & Q(locked=False)
         & Q(migration__storage__storage=storage_id)
-    )
+    ).first()
 
-    # for each GET request get the Migration and determine if the type of the
-    # Migration is GET_PENDING
-    get_count = 0
-    for gr in get_reqs:
-        # check for lock
-        if gr.locked:
-            continue
-        gr.lock()
-        # determine the credentials for the user - decrypt if necessary
-        if gr.credentials != {}:
-            credentials = AES_tools.AES_decrypt_dict(key, gr.credentials)
-        else:
-            credentials = {}
+    # .first() returns None when no requests that match the filter are found
+    if not gr:
+        return
+    # lock the Migration to prevent other processes acting upon it
+    if not gr.lock():
+        return
+    # determine the credentials for the user - decrypt if necessary
+    if gr.credentials != {}:
+        credentials = AES_tools.AES_decrypt_dict(key, gr.credentials)
+    else:
+        credentials = {}
 
-        if gr.stage == MigrationRequest.GET_PENDING:
-            # we might have to do something here, like create a download batch
-            # for elastic tape.  Also create the directory and transition the
-            # state
-            try:
-                download(backend_object, credentials, gr)
-                get_count += 1
-            except Exception as e:
-                # Something went wrong, set FAILED and failure_reason
-                mark_migration_failed(gr, str(e), e, upload_mig=False)
+    if gr.stage == MigrationRequest.GET_PENDING:
+        # we might have to do something here, like create a download batch
+        # for elastic tape.  Also create the directory and transition the
+        # state
+        try:
+            download(backend_object, credentials, gr)
+        except Exception as e:
+            # Something went wrong, set FAILED and failure_reason
+            mark_migration_failed(gr, str(e), e, upload_mig=False)
 
-        elif gr.stage == MigrationRequest.GETTING:
-            pass
+    elif gr.stage == MigrationRequest.GETTING:
+        pass
 
-        elif gr.stage == MigrationRequest.GET_RESTORE:
-            # restore the file permissions
-            try:
-                get_count += 1
-                restore_owner_and_group_on_get(backend_object, gr)
-            except Exception as e:
-                mark_migration_failed(gr, str(e), e, upload_mig=False)
-        gr.unlock()
-    return get_count
+    elif gr.stage == MigrationRequest.GET_RESTORE:
+        # restore the file permissions
+        try:
+            restore_owner_and_group_on_get(backend_object, gr)
+        except Exception as e:
+            mark_migration_failed(gr, str(e), e, upload_mig=False)
+    gr.unlock()
 
 
 def delete(backend_object, credentials, dr):
@@ -498,77 +478,74 @@ def delete_transfers(backend_object, key):
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
 
     # get the GET requests which are queued (GET_PENDING) for this backend
-    del_reqs = MigrationRequest.objects.filter(
+    dr = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.DELETE)
+        & Q(locked=False)
         & Q(migration__storage__storage=storage_id)
-    )
-    # for each GET request get the Migration and determine if the type of the
-    # Migration is GET_PENDING
-    del_count = 0
-    for dr in del_reqs:
-        # check for lock
-        if dr.locked:
-            continue
-        dr.lock()
+    ).first()
 
-        # find the associated PUT or MIGRATE migration request
-        # if there is one - if not, set put_req to None
-        # there will not be a migration request if the migration has completed
-        # as the migration request is deleted when a PUT or MIGRATE completes
+    # .first() returns None when no requests that match the filter are found
+    if not dr:
+        return
+    # lock the Migration to prevent other processes acting upon it
+    if not dr.lock():
+        return
+    # find the associated PUT or MIGRATE migration request
+    # if there is one - if not, set put_req to None
+    # there will not be a migration request if the migration has completed
+    # as the migration request is deleted when a PUT or MIGRATE completes
+    try:
+        put_req = MigrationRequest.objects.get(
+            (Q(request_type=MigrationRequest.PUT) |
+             Q(request_type=MigrationRequest.MIGRATE))
+            & Q(migration=dr.migration)
+            & Q(migration__storage__storage=storage_id)
+        )
+    except:
+        put_req = None
+
+    # determine the credentials for the user - decrypt if necessary
+    if dr.credentials != {}:
+        credentials = AES_tools.AES_decrypt_dict(key, dr.credentials)
+    else:
+        credentials = {}
+
+    # switch on the state machine status
+    if dr.stage == MigrationRequest.DELETE_PENDING:
         try:
-            put_req = MigrationRequest.objects.get(
-                (Q(request_type=MigrationRequest.PUT) |
-                 Q(request_type=MigrationRequest.MIGRATE))
-                & Q(migration=dr.migration)
-                & Q(migration__storage__storage=storage_id)
-            )
-        except:
-            put_req = None
+            # only try to do the delete if some files have been uploaded!
+            # and the external id is not None
+            if ((put_req and put_req.stage > MigrationRequest.PUT_PACKING and
+                 dr.migration.external_id is not None)
+               or (dr.migration.stage == Migration.ON_STORAGE)
+            ):
+                delete(backend_object, credentials, dr)
+            else:
+                # transition to DELETE_TIDY if there are no files to delete
+                dr.stage = MigrationRequest.DELETE_TIDY
+                logging.info((
+                    "Transition: request ID: {} external_id {}: DELETING->DELETE_TIDY"
+                ).format(dr.pk, dr.migration.external_id))
+                dr.save()
+            del_count += 1
+        except Exception as e:
+            # Something went wrong, set FAILED and failure_reason
+            mark_migration_failed(dr, str(e), e, upload_mig=False)
 
-        # determine the credentials for the user - decrypt if necessary
-        if dr.credentials != {}:
-            credentials = AES_tools.AES_decrypt_dict(key, dr.credentials)
-        else:
-            credentials = {}
-
-        # switch on the state machine status
-        if dr.stage == MigrationRequest.DELETE_PENDING:
-            try:
-                # only try to do the delete if some files have been uploaded!
-                # and the external id is not None
-                if ((put_req and put_req.stage > MigrationRequest.PUT_PACKING and
-                     dr.migration.external_id is not None)
-                   or (dr.migration.stage == Migration.ON_STORAGE)
-                ):
-                    delete(backend_object, credentials, dr)
-                else:
-                    # transition to DELETE_TIDY if there are no files to delete
-                    dr.stage = MigrationRequest.DELETE_TIDY
-                    logging.info((
-                        "Transition: request ID: {} external_id {}: DELETING->DELETE_TIDY"
-                    ).format(dr.pk, dr.migration.external_id))
-                    dr.save()
-                del_count += 1
-            except Exception as e:
-                # Something went wrong, set FAILED and failure_reason
-                mark_migration_failed(dr, str(e), e, upload_mig=False)
-
-        elif dr.stage == MigrationRequest.DELETING:
-        # in the process of deleting
-            pass
-        # unlock
-        dr.unlock()
-    return del_count
+    elif dr.stage == MigrationRequest.DELETING:
+    # in the process of deleting
+        pass
+    # unlock
+    dr.unlock()
 
 def process(backend_object, key):
     """Run the transfer processes on a backend.
     Keep a running total of whether any processes were run.
     If they weren't then put the daemon to sleep for a minute to prevent the
     database being hammered"""
-    n_put = put_transfers(backend_object, key)
-    n_get = get_transfers(backend_object, key)
-    n_del = delete_transfers(backend_object, key)
-    return n_put + n_get + n_del
+    put_transfers(backend_object, key)
+    get_transfers(backend_object, key)
+    delete_transfers(backend_object, key)
 
 def shutdown_handler(signum, frame):
     logging.info("Stopping jdma_transfer")
@@ -580,17 +557,8 @@ def run_loop(backend_objects):
     try:
         # read the decrypt key
         key = AES_tools.AES_read_key(settings.ENCRYPT_KEY_FILE)
-        n_procs = 0
         for backend_object in backend_objects:
-            n_procs += process(backend_object, key)
-
-        # print the number of connections
-        sum_c = 0
-        for c in connection_pool.pool:
-            sum_c += len(connection_pool.pool)
-        # sleep for ten secs if nothing happened in the loop
-        if n_procs == 0:
-            sleep(10)
+            process(backend_object, key)
     except SystemExit:
         for backend_object in backend_objects:
             backend_object.exit()

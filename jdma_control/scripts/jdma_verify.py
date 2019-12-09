@@ -132,6 +132,7 @@ def verify(backend_object, pr, config):
         pr.stage = MigrationRequest.PUT_TIDY
         # reset last archive
         pr.last_archive = 0
+        pr.save()
         logging.info((
             "Transition: request ID: {} external ID: {} VERIFYING->PUT_TIDY"
         ).format(pr.pk, pr.migration.external_id))
@@ -143,19 +144,20 @@ def verify_files(backend_object, config):
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
 
     # these are part of a PUT request - get the list of PUT request
-    put_reqs = MigrationRequest.objects.filter(
+    pr = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
+        & Q(locked=False)
         & Q(stage=MigrationRequest.VERIFYING)
         & Q(migration__storage__storage=storage_id)
-    )
-    for pr in put_reqs:
-        if pr.locked:
-            return
-        # lock the migration
-        pr.lock()
-        verify(backend_object, pr, config)
-        pr.unlock()
+    ).first()
+    if not pr:
+        return
+    # lock the Migration to prevent other processes acting upon it
+    if not pr.lock():
+        return
+    verify(backend_object, pr, config)
+    pr.unlock()
 
 def exit_handler(signal, frame):
     logging.info("Stopping jdma_verify")

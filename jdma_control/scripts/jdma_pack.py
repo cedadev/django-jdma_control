@@ -192,32 +192,30 @@ def put_packing(backend_object, config):
     # get the storage id for the backend object
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # Get the PUT requests for this backend which are in the PACKING stage
-    put_reqs = MigrationRequest.objects.filter(
+    pr = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
+        & Q(locked=False)
         & Q(migration__storage__storage=storage_id)
         & Q(stage=MigrationRequest.PUT_PACKING)
-    )
-    # for each PUT request pack the archive files.
-    # split into a loop so it can be parallelised later
-    for pr in put_reqs:
-        # check if locked
-        if pr.locked:
-            continue
-        try:
-            pr.lock()
-            pack_request(
-                pr,
-                backend_object.ARCHIVE_STAGING_DIR,
-                config
-            )
-            pr.unlock()
-        except Exception as e:
-            error_string = (
-                "Could not pack archive for batch: {}: {}"
-            ).format(pr.migration.get_id(), str(e))
-            # mark the migration as failed
-            mark_migration_failed(pr, error_string, e)
+    ).first()
+    if not pr:
+        return
+    try:
+        if not pr.lock():
+            return
+        pack_request(
+            pr,
+            backend_object.ARCHIVE_STAGING_DIR,
+            config
+        )
+        pr.unlock()
+    except Exception as e:
+        error_string = (
+            "Could not pack archive for batch: {}: {}"
+        ).format(pr.migration.get_id(), str(e))
+        # mark the migration as failed
+        mark_migration_failed(pr, error_string, e)
 
 
 def unpack_archive(archive_staging_dir, archive, external_id,
@@ -336,31 +334,29 @@ def get_unpacking(backend_object, config):
     # get the storage id for the backend object
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # Get the GET requests for this backend which are in the PACKING stage.
-    get_reqs = MigrationRequest.objects.filter(
+    gr = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.GET)
         & Q(migration__storage__storage=storage_id)
         & Q(stage=MigrationRequest.GET_UNPACKING)
-    )
-    # loop over the GET requests and unpack each archive
-    # split into a loop so it can be parallelised later
-    for gr in get_reqs:
-        # check locked
-        if gr.locked:
-            continue
-        try:
-            gr.lock()
-            unpack_request(
-                gr,
-                get_download_dir(backend_object, gr),
-                config
-            )
-            gr.unlock()
-        except Exception as e:
-            error_string = (
-                "Could not unpack request for batch: {}: {}"
-            ).format(str(gr.migration.external_id), str(e))
-            logging.error(error_string)
-            mark_migration_failed(gr, error_string, e, upload_mig=True)
+    ).first()
+    if not gr:
+        return
+
+    try:
+        if not gr.lock():
+            return
+        unpack_request(
+            gr,
+            get_download_dir(backend_object, gr),
+            config
+        )
+        gr.unlock()
+    except Exception as e:
+        error_string = (
+            "Could not unpack request for batch: {}: {}"
+        ).format(str(gr.migration.external_id), str(e))
+        logging.error(error_string)
+        mark_migration_failed(gr, error_string, e, upload_mig=True)
 
 
 def process(backend, config):
