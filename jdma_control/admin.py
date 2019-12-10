@@ -82,11 +82,12 @@ admin.site.register(MigrationRequest, MigrationRequestAdmin)
 class MigrationFileAdmin(admin.ModelAdmin):
     save_on_top = True
     list_display = ('pk', 'path', 'formatted_size', 'ftype', 'archive')
-    fields = ('path', 'digest', 'formatted_size', 'unix_user_id',
-              'unix_group_id', 'unix_permission', 'ftype', 'link_target',
-              'link_to_archive')
+    fields = ('path', 'digest', 'digest_format','formatted_size',
+              'unix_user_id', 'unix_group_id', 'unix_permission', 'ftype',
+              'link_target', 'link_to_archive')
     list_filter = ('ftype',)
-    readonly_fields = ('digest', 'formatted_size', 'ftype', 'link_to_archive')
+    readonly_fields = ('digest', 'digest_format', 'formatted_size',
+                       'ftype', 'link_to_archive')
     search_fields = ('path',)
 
     def link_to_archive(self, obj):
@@ -101,11 +102,12 @@ admin.site.register(MigrationFile, MigrationFileAdmin)
 
 class MigrationArchiveAdmin(admin.ModelAdmin):
     save_on_top = True
-    list_display = ('pk', 'migration', 'formatted_size', 'digest')
-    fields = ('link_to_migration', 'formatted_size', 'digest', 'packed',
-              'get_file_list_text')
+    list_display = ('pk', 'migration', 'formatted_size', 'digest',
+                    'digest_format')
+    fields = ('link_to_migration', 'formatted_size', 'digest', 'digest_format',
+              'packed', 'get_file_list_text')
     readonly_fields = ('link_to_migration', 'formatted_size', 'digest',
-                       'packed', 'get_file_list_text')
+                       'digest_format', 'packed', 'get_file_list_text')
     search_fields = ('migration.workspace',)
 
     def link_to_migration(self, obj):

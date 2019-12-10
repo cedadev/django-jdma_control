@@ -493,10 +493,16 @@ class MigrationArchive(models.Model):
     This is to enabled efficient upload / download of small files.
     An archive may often contain only one file.
     """
-    # SHA-256 digest
+    # Checksum digest and format
     digest = models.CharField(
         max_length=64,
-        help_text="SHA-256 digest of the archive"
+        help_text="Digest of the archive"
+    )
+    digest_format = models.CharField(
+        max_length=32,
+        null=True,
+        blank=False,
+        default="SHA256"
     )
     # which migration does this belong to?
     # Many to one mapping (many Migration Archives->one Migration)
@@ -599,11 +605,17 @@ class MigrationFile(models.Model):
         null=True,
         help_text="Relative path to the file (relative to Migration.common_path)"
     )
-    # SHA-256 digest
+    # Checksum digest
     digest = models.CharField(
         max_length=64,
         null=True,
-        help_text="SHA-256 digest of the file"
+        help_text="Checksum digest of the file"
+    )
+    digest_format = models.CharField(
+        max_length=32,
+        null=True,
+        blank=False,
+        default="SHA256"
     )
     # size in bytes
     size = FileSizeField(
