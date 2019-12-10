@@ -17,7 +17,6 @@ from django.db.models import Q
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 from jdma_control.models import StorageQuota
-from jdma_control.scripts.jdma_lock import calculate_digest
 from jdma_control.scripts.jdma_transfer import mark_migration_failed
 from jdma_control.scripts.jdma_transfer import get_download_dir
 from jdma_control.scripts.common import get_archive_set_from_get_request
@@ -25,6 +24,7 @@ from jdma_control.scripts.common import split_args
 import jdma_control.backends
 from jdma_control.scripts.config import read_process_config
 from jdma_control.scripts.config import get_logging_format, get_logging_level
+from jdma_control.scripts.common import calculate_digest_adler32
 
 def pack_archive(request_staging_dir, archive, pr):
     """Create a tar file containing the files that are in the
@@ -86,9 +86,11 @@ def pack_archives(archive_list, q):
                     "    Adding file to TarFile archive: {}"
                 ).format(mp[0]))
         tar_file.close()
-        # calculate digest (element 2) and size (element 3) and add to archive
-        archive_info[2] = calculate_digest(tar_file_path)
-        archive_info[3] = os.stat(tar_file_path).st_size
+        # calculate digest (element 2), digest format (element 3)
+        # and size (element 4) and add to archive
+        archive_info[2] = calculate_digest_adler32(tar_file_path)
+        archive_info[3] = "ADLER32"
+        archive_info[4] = os.stat(tar_file_path).st_size
 
     q.put(archive_list)
 
@@ -146,6 +148,7 @@ def pack_request(pr, archive_staging_dir, config):
             [tar_file_path,
              migration_paths,
              "", # digest
+             "", # digest format
              0,  # size
              archive.pk, # id
             ]
@@ -170,9 +173,10 @@ def pack_request(pr, archive_staging_dir, config):
             local_archive_list = p[1].get()
             # assign the digests and sizes to the archive
             for la in local_archive_list:
-                archive = pr.migration.migrationarchive_set.get(pk=la[4])
+                archive = pr.migration.migrationarchive_set.get(pk=la[5])
                 archive.digest = la[2]
-                archive.size = la[3]
+                archive.digest_format = la[3]
+                archive.size = la[4]
                 archive.save()
             p[0].join()
 

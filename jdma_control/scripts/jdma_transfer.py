@@ -23,7 +23,7 @@ import jdma_control.backends
 import jdma_control.backends.AES_tools as AES_tools
 from jdma_control.scripts.common import mark_migration_failed
 from jdma_control.scripts.common import restore_owner_and_group
-from jdma_control.scripts.common import calculate_digest, split_args
+from jdma_control.scripts.common import split_args
 from jdma_control.scripts.common import get_archive_set_from_get_request
 from jdma_control.scripts.common import get_verify_dir, get_staging_dir, get_download_dir
 from jdma_control.scripts.config import read_process_config

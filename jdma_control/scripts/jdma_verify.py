@@ -20,14 +20,17 @@ from django.db.models import Q
 import jdma_site.settings as settings
 from jdma_control.models import Migration, MigrationRequest
 from jdma_control.models import StorageQuota, MigrationFile
-from jdma_control.scripts.jdma_lock import calculate_digest
 from jdma_control.scripts.jdma_transfer import mark_migration_failed
 from jdma_control.scripts.jdma_transfer import get_verify_dir
 import jdma_control.backends
 from jdma_control.scripts.config import read_process_config
 from jdma_control.scripts.config import get_logging_format, get_logging_level
-from jdma_control.scripts.common import split_args
+from jdma_control.scripts.common import split_args, calculate_digest_sha256
+from jdma_control.scripts.common import calculate_digest_adler32
+from collections import namedtuple
 
+VerifyFileInfo = namedtuple('VerifyFileInfo',
+                            ['filepath', 'digest', 'digest_format', 'pk'])
 
 def get_permissions_string(p):
     # this is unix permissions
@@ -44,14 +47,24 @@ def verify_list_of_files(list_of_files, pr):
     for file_info in list_of_files:
         try:
             # calculate the new digest
-            new_digest = calculate_digest(file_info[0])
+            if file_info.digest_format == "ADLER32":
+                new_digest = calculate_digest_adler32(file_info.filepath)
+            elif file_info.digest_format == "SHA256":
+                new_digest = calculate_digest_sha256(file_info.filepath)
+            else:
+                failure_reason = (
+                    "VERIFY: file or archive {} has an unsupported digest {}."
+                ).format(file_info.filepath, file_info.digest_format)
+                mark_migration_failed(pr, failure_reason)
+                break
+
             # get the stored digest - this will depend if the archive
             # is packed or not
             # check that the digests match
-            if new_digest != file_info[1]:
+            if new_digest != file_info.digest:
                 failure_reason = (
                     "VERIFY: file or archive {} has a different digest."
-                ).format(file_info[0])
+                ).format(file_info.filepath)
                 mark_migration_failed(pr, failure_reason)
                 break
         except Exception as e:
@@ -60,7 +73,7 @@ def verify_list_of_files(list_of_files, pr):
             # failure_reason
             failure_reason = (
                 "VERIFY: file or archive {} failed: {}"
-            ).format(file_info[0], str(e))
+            ).format(file_info.filepath, str(e))
             mark_migration_failed(pr, failure_reason)
             break
 
@@ -92,21 +105,26 @@ def verify(backend_object, pr, config):
                 verify_dir,
                 file_path
             )
+            # add the filename, digest and archive index to the list
             if archive.packed:
-                stored_digest = archive.digest
+                digest = archive.digest
+                digest_format = archive.digest_format
             else:
                 file_obj = MigrationFile.objects.get(
                     path=file_path,
                     archive__migration=pr.migration
                 )
-                stored_digest = file_obj.digest
+                digest = file_obj.digest
+                digest_format = file_obj.digest_format
 
             # add the filename, digest and archive index to the list
-            file_and_digest_list.append((
+            verify_file_info = VerifyFileInfo(
                 verify_file_path,
-                stored_digest,
+                digest,
+                digest_format,
                 archive.pk
-            ))
+            )
+            file_and_digest_list.append(verify_file_info)
 
     # now create a number of threads to check the digests
     if len(file_and_digest_list) > 0:

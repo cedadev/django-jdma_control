@@ -193,6 +193,7 @@ def lock_put_migration(pr, config):
             )
             mig_file.size = fileinfo.size
             mig_file.digest = fileinfo.digest
+            mig_file.digest_format = fileinfo.digest_format
             mig_file.unix_user_id = fileinfo.unix_user_id
             mig_file.unix_group_id = fileinfo.unix_group_id
             mig_file.unix_permission = fileinfo.unix_permission
