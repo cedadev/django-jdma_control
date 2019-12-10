@@ -1406,6 +1406,7 @@ class MigrationFileView(View):
                     # add digest if requested
                     if digest:
                         arch_dict["digest"] = archive.digest
+                        arch_dict["digest_format"] = archive.digest_format
 
                     # get the files
                     if limit == 0:
@@ -1422,6 +1423,7 @@ class MigrationFileView(View):
                                      "size" : f.size}
                         if digest:
                             file_dict["digest"] = f.digest
+                            file_dict["digest_format"] = f.digest_format
                         # don't add if digest is zero
                         if f.digest != "0":
                             file_data.append(file_dict)
@@ -1583,6 +1585,7 @@ class MigrationArchiveView(View):
                     # add digest if requested
                     if digest:
                         arch_dict["digest"] = archive.digest
+                        arch_dict["digest_format"] = archive.digest_format
 
                     # don't add files with a 0 digest, as these are folders /
                     # directories
