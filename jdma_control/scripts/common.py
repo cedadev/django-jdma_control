@@ -2,6 +2,7 @@ import os
 import stat
 import datetime
 import hashlib
+import zlib
 import logging
 import subprocess
 import math
@@ -11,9 +12,9 @@ from collections import namedtuple
 import socket
 
 FileInfo = namedtuple('FileInfo',
-                      ['filepath', 'size', 'digest', 'unix_user_id',
-                       'unix_group_id', 'unix_permission', 'ftype',
-                       'link_target'],
+                      ['filepath', 'size', 'digest', 'digest_format',
+                       'unix_user_id', 'unix_group_id', 'unix_permission',
+                       'ftype', 'link_target'],
                        verbose=False)
 
 def split_args(args):
@@ -27,9 +28,9 @@ def split_args(args):
             raise Exception("Error in arguments")
     return arg_dict
 
-def calculate_digest(filename):
+def calculate_digest_sha256(filename):
     # Calculate the hex digest of the file, using a buffer
-    BUFFER_SIZE = 256 * 1024  # (256KB) - adjust this
+    BUFFER_SIZE = 1024 * 1024  # (1MB) - adjust this
 
     # create a sha256 object
     sha256 = hashlib.sha256()
@@ -43,6 +44,20 @@ def calculate_digest(filename):
             sha256.update(data)
     return "{0}".format(sha256.hexdigest())
 
+def calculate_digest_adler32(filename):
+    # Calculate the hex digest of the file, using a buffer
+    BUFFER_SIZE = 1024 * 1024  # (1MB) - adjust this
+    # read through the file
+    prev = 0
+    with open(filename, 'rb') as file:
+        while True:
+            data = file.read(BUFFER_SIZE)
+            if not data:  # EOF
+                break
+            cur = zlib.adler32(data, prev)
+            prev = cur
+    return "{0}".format(hex(prev & 0xffffffff))
+
 def get_file_info_tuple(filepath):
     """Get all the info for a file, and return in a tuple.
     Info is: size, SHA-256 digest, unix-uid, unix-gid, unix-permissions, dir?"""
@@ -53,14 +68,18 @@ def get_file_info_tuple(filepath):
     # calc SHA256 digest
     if stat.S_ISLNK(fstat.st_mode):
         digest = 0
+        digest_format = ""
         ftype = "LINK"
         # get the link location
         link_target = os.path.abspath(os.path.realpath(filepath))
     elif stat.S_ISDIR(fstat.st_mode):
         digest = 0
+        digest_format = ""
         ftype = "DIR"
     else:
-        digest = calculate_digest(filepath)
+        # default to adler32 now for speeed
+        digest = calculate_digest_adler32(filepath)
+        digest_format = "ADLER32"
         ftype = "FILE"
     # get the unix user id owner of the file - just use the raw value and store
     # as integer now
@@ -74,6 +93,7 @@ def get_file_info_tuple(filepath):
         filepath,
         size,
         digest,
+        digest_format,
         unix_user_id,
         unix_group_id,
         unix_permission,
