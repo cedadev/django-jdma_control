@@ -115,7 +115,8 @@ def get_et_quota_used(url, workspace):
     except Exception:
         error_msg = "Could not parse XML document at: " + quota_url
         logging.error(error_msg)
-        raise Exception(error_msg)
+        quota = 0
+        quota_used = 0
     return quota, quota_used
 
 def exit_handler(signal, frame):

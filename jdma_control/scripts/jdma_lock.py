@@ -126,18 +126,8 @@ def lock_put_migration(pr, config):
 
     # 1. change the owner of the common_path directory to be root
     # 2. change the read / write permissions to be user-only
-    subprocess.call([
-        "/usr/bin/sudo",
-        "/bin/chown",
-        "root:root",
-        pr.migration.common_path
-    ])
-    subprocess.call([
-        "/usr/bin/sudo",
-        "/bin/chmod",
-        "700",
-        pr.migration.common_path
-    ])
+    os.chown(pr.migration.common_path, 0, 0)
+    os.chmod(pr.migration.common_path, 700)
 
     # sort the file_infos based on size using attrgetter
     # this will group all the small files together
@@ -293,8 +283,12 @@ def lock_put_migrations(backend_object, config):
     if not pr.lock():
         return
     # carry out the lock migration
-    lock_put_migration(pr, config)
-    pr.unlock()
+    try:
+        lock_put_migration(backend_object, pr)
+        pr.unlock()
+    except Exception as e:
+        pr.unlock()
+        mark_migration_failed(pr, str(e), e, True)
 
 
 def lock_get_migration(gr):
@@ -305,12 +299,9 @@ def lock_get_migration(gr):
     # 2. change the owner of the directory to be root
     # 3. change the read / write permissions to be user-only
     if not os.path.isdir(gr.target_path):
-        subprocess.call(["/usr/bin/sudo", "/bin/mkdir",
-                         gr.target_path])
-    subprocess.call(["/usr/bin/sudo", "/bin/chown", "root:root",
-                    gr.target_path])
-    subprocess.call(["/usr/bin/sudo", "/bin/chmod", "700",
-                    gr.target_path])
+        os.mkdir(gr.target_path)
+    os.chown(gr.target_path, 0, 0)
+    os.chmod(gr.target_path, 700)
     # set the migration stage to be GET_PENDING
     gr.stage = MigrationRequest.GET_PENDING
     gr.save()
@@ -337,8 +328,12 @@ def lock_get_migrations(backend_object):
         return
     if not gr.lock():
         return
-    lock_get_migration(gr)
-    gr.unlock()
+    try:
+        lock_get_migration(gr)
+        gr.unlock()
+    except Exception as e:
+        gr.unlock()
+        mark_migration_failed(gr, str(e), e, False)
 
 
 def lock_delete_migration(backend_object, dr):
@@ -379,8 +374,12 @@ def lock_delete_migrations(backend_object):
         return
     if not dr.lock():
         return
-    lock_delete_migration(backend_object, dr)
-    dr.unlock()
+    try:
+        lock_delete_migration(backend_object, dr)
+        dr.unlock()
+    except Exception as e:
+        dr.unlock()
+        mark_migration_failed(dr, str(e), e, False)
 
 
 def process(backend, config):

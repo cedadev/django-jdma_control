@@ -400,6 +400,11 @@ def get_transfers(backend_object, key):
         Q(request_type=MigrationRequest.GET)
         & Q(locked=False)
         & Q(migration__storage__storage=storage_id)
+        & Q(stage__in=[
+              MigrationRequest.GET_PENDING,
+              MigrationRequest.GETTING,
+              MigrationRequest.GET_RESTORE,
+          ])
     ).first()
 
     # .first() returns None when no requests that match the filter are found
@@ -477,11 +482,15 @@ def delete_transfers(backend_object, key):
     # get the storage id for the backend object
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
 
-    # get the GET requests which are queued (GET_PENDING) for this backend
+    # get the DELETE requests which are queued (DELETE_PENDING) for this backend
     dr = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.DELETE)
         & Q(locked=False)
         & Q(migration__storage__storage=storage_id)
+        & Q(stage__in=[
+            MigrationRequest.DELETE_PENDING,
+            MigrationRequest.DELETING
+          ])
     ).first()
 
     # .first() returns None when no requests that match the filter are found

@@ -27,6 +27,8 @@ import jdma_site.settings as settings
 # transfer thread requires a connection that is kept up
 et_connection_pool = ConnectionPool()
 
+class ETException(Exception):
+    pass
 
 def get_completed_puts(backend_object):
     """Get all the completed puts for the Elastic Tape"""
@@ -49,14 +51,15 @@ def get_completed_puts(backend_object):
     for pr in put_reqs:
         # form the url and get the response, parse the document using bs4
         holdings_url = "{}?batch={}".format(
-	    ET_Settings["ET_INPUT_BATCH_SUMMARY_URL"], 
+	    ET_Settings["ET_INPUT_BATCH_SUMMARY_URL"],
             pr.migration.external_id
         )
+        sleep(0.1)  # 100 ms delay to avoid overloading the server
         r = requests.get(holdings_url)
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise Exception(holdings_url + " is unreachable.")
+            raise ETException(holdings_url + " is unreachable.")
 
         # get the 2nd table - 1st is just a heading table
         table = bs.find_all("table")[1]
@@ -107,11 +110,12 @@ def get_completed_gets(backend_object):
             gr.migration.workspace.workspace,
         )
         # use requests to fetch the URL
+        sleep(0.1)  # 100 ms delay to avoid overloading the server
         r = requests.get(retrieval_url)
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise Exception(retrieval_url + " is unreachable.")
+            raise ETException(retrieval_url + " is unreachable.")
         # get the 2nd table from beautiful soup
         table = bs.find_all("table")[1]
         # check that a table has been found - there might be a slight
@@ -134,7 +138,7 @@ def get_completed_gets(backend_object):
         status = cols[2].get_text()
         # this is a paranoid check - this really shouldn't happen!
         if (transfer_id != gr.transfer_id):
-            raise Exception("Transfer id mismatch")
+            raise ETException("Transfer id mismatch")
         # check for completion
         if status == "COMPLETED":
             completed_GETs.append(gr.transfer_id)
@@ -167,11 +171,12 @@ def get_completed_deletes(backend_object):
             dr.migration.user.name
         )
         # use requests to fetch the URL
+        sleep(0.1)  # 100 ms delay to avoid overloading the server
         r = requests.get(holdings_url)
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise Exception(holdings_url + " is unreachable.")
+            raise ETException(holdings_url + " is unreachable.")
         # if the dr.migration.external_id is not in the list of batches
         # then the delete has completed
         batches = bs.select("batch")
@@ -192,11 +197,12 @@ def user_in_workspace(jdma_user, jdma_workspace, ET_Settings):
     We'll ask Kevin O'Neill to provide a JSON version of this."""
 
     # get from requests
+    sleep(0.1)  # 100 ms delay to avoid overloading the server
     r = requests.get(ET_Settings["ET_ROLE_URL"])
     if r.status_code == 200:
         bs = BeautifulSoup(r.content, "html5lib")
     else:
-        raise Exception(ET_Settings["ET_ROLE_URL"] + " is unreachable.")
+        raise ETException(ET_Settings["ET_ROLE_URL"] + " is unreachable.")
 
     # parse into dictionary from table
     gws_roles = {}
@@ -216,8 +222,9 @@ def user_in_workspace(jdma_user, jdma_workspace, ET_Settings):
 
     # no roles were returned
     if gws_roles == {}:
-        raise Exception(ET_Settings["ET_ROLE_URL"] + " did not return a valid list"
-                        " of roles")
+        raise ETException(
+            ET_Settings["ET_ROLE_URL"] + " did not return a valid list of roles"
+        )
     # check if workspace exists
     if jdma_workspace not in gws_roles:
         return False
@@ -235,12 +242,13 @@ def workspace_quota_remaining(jdma_user, jdma_workspace, ET_Settings):
                               "?workspace=", jdma_workspace,
                               ";caller=", jdma_user)
     # fetch using requests
+    sleep(0.1)  # 100 ms delay to avoid overloading the server
     r = requests.get(url)
     if r.status_code == 200:
         # success, so parse the json
         bs = BeautifulSoup(r.content, "html5lib")
     else:
-        raise Exception(url + " is unreachable.")
+        raise ETException(url + " is unreachable.")
 
     quota_allocated = -1
     quota_used = -1
@@ -254,7 +262,7 @@ def workspace_quota_remaining(jdma_user, jdma_workspace, ET_Settings):
 
     # check that valid quotas were returned
     if quota_allocated == -1 or quota_used == -1:
-        raise Exception(url + " did not return a quota.")
+        raise ETException(url + " did not return a quota.")
 
     return quota_allocated - quota_used
 
@@ -288,8 +296,8 @@ class ElasticTapeBackend(Backend):
             completed_DELETEs = get_completed_deletes(self)
         except SystemExit:
             return [], [], []
-        except Exception as e:
-            raise Exception(e)
+        except ETException as e:
+            logging.error("Error in ET monitor: {}".format(str(e)))
         return completed_PUTs, completed_GETs, completed_DELETEs
 
     def pack_data(self):
@@ -457,7 +465,7 @@ class ElasticTapeBackend(Backend):
 
         except Exception as e:
             batch_id = None
-            raise Exception(str(e))
+            raise ETException(str(e))
         return str(batch_id)
 
 

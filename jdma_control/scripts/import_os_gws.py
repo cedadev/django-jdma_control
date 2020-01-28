@@ -27,7 +27,7 @@ def create_user_gws_quotas(data):
             create_quota_entry(storageid, new_gws, 32 * 10**12, 0)
 
 def exit_handler(signal, frame):
-    logging.info("Stopping import_et_gws")
+    logging.info("Stopping import_os_gws")
     sys.exit(0)
 
 def run(*args):
