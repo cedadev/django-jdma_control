@@ -1,19 +1,21 @@
 from django.views.generic import View
+from oauth2_provider.views.generic import ScopedProtectedResourceView
 from jdma_control.models import *
 from jdma_control.views_functions import *
 from datetime import datetime
 import subprocess
 
-import jdma_site.settings as settings
+from django.conf import settings
 import jdma_control.backends
 import jdma_control.backends.AES_tools as AES_tools
 
-class UserView(View):
+class UserView(ScopedProtectedResourceView):
     """:rest-api
 
     Requests to resources which concern the users in the JASMIN data migration
     app (JDMA).
     """
+    required_scopes = [settings.JDMA_OAUTH_SCOPE]
 
     def get(self, request, *args, **kwargs):
         """:rest-api
@@ -313,13 +315,14 @@ class UserView(View):
                                 content_type="application/json")
 
 
-class MigrationRequestView(View):
+class MigrationRequestView(ScopedProtectedResourceView):
     """:rest-api
 
     Requests to resources concerning migration requests in the JASMIN data
     migration app (JDMA).
     Note - no PUT, cannot edit any part of the request
     """
+    required_scopes = ['https://jdma.ceda.ac.uk']
 
     def get(self, request, *args, **kwargs):
         """:rest-api
@@ -1059,13 +1062,14 @@ class MigrationRequestView(View):
                             content_type="application/json")
 
 
-class MigrationView(View):
+class MigrationView(ScopedProtectedResourceView):
     """:rest-api
 
     Requests to resources concerning migrations in the JASMIN data migration
     app (JDMA).  Note that there is no POST method, as POST to this model is
     handled by POSTs to MigrationRequestView
     """
+    required_scopes = ['https://jdma.ceda.ac.uk']
 
     def get(self, request, *args, **kwargs):
         """:rest-api"""
@@ -1272,13 +1276,14 @@ class MigrationView(View):
         return HttpResponse(json.dumps(data),
                             content_type="application/json")
 
-class MigrationFileView(View):
+class MigrationFileView(ScopedProtectedResourceView):
     """:rest-api
 
     Requests to resources concerning files in the JASMIN data migration
     app (JDMA).  Note that there is only a GET method, as creation of
     MigrationFiles occurs in the jdma_lock script.
     """
+    required_scopes = ['https://jdma.ceda.ac.uk']
 
     def get(self, request, *args, **kwargs):
         """:rest-api"""
@@ -1445,13 +1450,14 @@ class MigrationFileView(View):
         return HttpResponse(json.dumps(data), content_type="application/json")
 
 
-class MigrationArchiveView(View):
+class MigrationArchiveView(ScopedProtectedResourceView):
     """:rest-api
 
     Requests to resources concerning archives in the JASMIN data migration
     app (JDMA).  Note that there is only a GET method, as creation of
     MigrationArchives occurs in the jdma_lock script.
     """
+    required_scopes = ['https://jdma.ceda.ac.uk']
 
     def get(self, request, *args, **kwargs):
         """:rest-api"""

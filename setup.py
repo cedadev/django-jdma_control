@@ -15,10 +15,11 @@ setup(
         'appdirs',
         'beautifulsoup4',
         'boto3',
-        'django',
+        'django==2.2.5',
         'django-extensions',
         'django-multiselectfield',
         'django-sizefield',
+        'django-oauth-toolkit',
         'html5lib',
         'lxml',
         'jasmin-ldap',
@@ -27,7 +28,10 @@ setup(
         'pycryptodome',
         'pyparsing',
         'pytz',
-        'requests'
+        'requests',
+        'six',
+        'dot-dynamic-scopes',
+        'django-settings-object'
     ],
     include_package_data=True,
     license='my License',  # example license

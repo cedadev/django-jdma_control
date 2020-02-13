@@ -1,7 +1,6 @@
 from __future__ import unicode_literals
 
 from django.db import models
-from django.utils.encoding import python_2_unicode_compatible
 from django.contrib.postgres.operations import HStoreExtension
 from django.contrib.postgres.fields import HStoreField, ArrayField
 from sizefield.models import FileSizeField
@@ -9,7 +8,6 @@ from sizefield.utils import filesizeformat
 import jdma_control.backends
 import os
 
-@python_2_unicode_compatible
 class User(models.Model):
     """User of the JASMIN data migration app (JDMA).
     Users register directories from a group workspace (GWS) with the JDMA
@@ -41,7 +39,6 @@ class User(models.Model):
         return "%s (%s)" % (self.name, self.email)
 
 
-@python_2_unicode_compatible
 class Groupworkspace(models.Model):
     """A record of a quota for a group workspace,
     for each external storage backend
@@ -70,7 +67,6 @@ class Groupworkspace(models.Model):
         return self.workspace
 
 
-@python_2_unicode_compatible
 class StorageQuota(models.Model):
     """Storage type and quota to be used by Groupworkspace Quota"""
 
@@ -134,7 +130,6 @@ class StorageQuota(models.Model):
         )
         return desc_str
 
-@python_2_unicode_compatible
 class Migration(models.Model):
     """A data model to store the details of a directory that has been migrated
     via the JASMIN data migration app (JDMA).
@@ -246,7 +241,6 @@ class Migration(models.Model):
 
 
 
-@python_2_unicode_compatible
 class MigrationRequest(models.Model):
     """A request to upload (PUT) or retrieve (GET) a directory via the JASMIN
     data migration app (JDMA).
@@ -486,7 +480,6 @@ class MigrationRequest(models.Model):
             return out_str
     formatted_filelist.short_description = "filelist"
 
-@python_2_unicode_compatible
 class MigrationArchive(models.Model):
     """An archive stores a list of files that are to be tarred together then
     uploaded.
@@ -594,7 +587,6 @@ class MigrationArchive(models.Model):
         return output
     get_file_list_text.short_description= "List of files in archive"
 
-@python_2_unicode_compatible
 class MigrationFile(models.Model):
     """A record of a file in a migration in the JASMIN data migration app
     (JDMA).
