@@ -537,11 +537,11 @@ class MigrationArchive(models.Model):
     def first_file(self):
         """Get the first file in the archive"""
         q_set = self.migrationfile_set.all()
-        if len(q_set) == 0:
+        if q_set.count() == 0:
             return ""
         else:
             fname = q_set[0].path
-            return str(len(q_set)) + " files. First file: " + fname
+            return str(q_set.count()) + " files. First file: " + fname
     first_file.short_description = "first_file"
 
     def formatted_size(self):
@@ -582,7 +582,9 @@ class MigrationArchive(models.Model):
                 file_list[f.ftype].append(os.path.join(prefix, f.path))
             else:
                 if f.path in filter_list:
-                    file_list[f.ftype].append(os.path.join(prefix, f.path))
+                    full_path = os.path.join(prefix, f.path)
+                    if not full_path in file_list[f.ftype]:
+                        file_list[f.ftype].append(full_path)
         return file_list
     get_file_names.short_description= "Filelist"
 

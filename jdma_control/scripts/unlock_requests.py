@@ -9,8 +9,8 @@ def get_stage(stage_string):
     stage_choices = {
         'PUT_START'        : MigrationRequest.PUT_START,
         'PUT_BUILDING'     : MigrationRequest.PUT_BUILDING,
-        'PUT_PENDING'	   : MigrationRequest.PUT_PENDING,
-        'PUT_PACKING'	   : MigrationRequest.PUT_PACKING,
+        'PUT_PENDING'      : MigrationRequest.PUT_PENDING,
+        'PUT_PACKING'      : MigrationRequest.PUT_PACKING,
         'PUTTING'          : MigrationRequest.PUTTING,
         'VERIFY_PENDING'   : MigrationRequest.VERIFY_PENDING,
         'VERIFY_GETTING'   : MigrationRequest.VERIFY_GETTING,
@@ -19,17 +19,17 @@ def get_stage(stage_string):
         'PUT_COMPLETED'    : MigrationRequest.PUT_COMPLETED,
 
         'GET_START'        : MigrationRequest.GET_START,
-        'GET_PENDING'	   : MigrationRequest.GET_PENDING,
+        'GET_PENDING'      : MigrationRequest.GET_PENDING,
         'GETTING'          : MigrationRequest.GETTING,
         'GET_UNPACKING'    : MigrationRequest.GET_UNPACKING,
-        'GET_RESTORE'	   : MigrationRequest.GET_RESTORE,
+        'GET_RESTORE'      : MigrationRequest.GET_RESTORE,
         'GET_TIDY'         : MigrationRequest.GET_TIDY,
         'GET_COMPLETED'    : MigrationRequest.GET_COMPLETED,
 
         'DELETE_START'     : MigrationRequest.DELETE_START,
         'DELETE_PENDING'   : MigrationRequest.DELETE_PENDING,
         'DELETING'         : MigrationRequest.DELETING,
-        'DELETE_TIDY'	   : MigrationRequest.DELETE_TIDY,
+        'DELETE_TIDY'      : MigrationRequest.DELETE_TIDY,
         'DELETE_COMPLETED' : MigrationRequest.DELETE_COMPLETED,
 
         'FAILED'           : MigrationRequest.FAILED,
@@ -41,9 +41,8 @@ def run(*args):
     arg_dict = split_args(args)
     if "stage" in arg_dict:
         stage = get_stage(arg_dict["stage"])
-
     else:
-	raise Exception("stage argument not supplied")
+        raise Exception("stage argument not supplied")
 
     pr = MigrationRequest.objects.filter(
          (Q(request_type=MigrationRequest.PUT)

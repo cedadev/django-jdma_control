@@ -189,7 +189,7 @@ class Backend(object):
         # or, is the user a groupworkspace manager of the GWS
         try:
             group_workspace = Groupworkspace.objects.get(workspace=workspace)
-            if len(group_workspace.managers.filter(name=username)) == 0:
+            if group_workspace.managers.filter(name=username).count() == 0:
                 return False
         except:
             return False

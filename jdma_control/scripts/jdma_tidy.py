@@ -178,8 +178,13 @@ def remove_archive_files(backend_object, pr):
         archive_dir = get_download_dir(backend_object, pr)
     # remove the directory
     if os.path.isdir(archive_dir):
-        shutil.rmtree(archive_dir)
-        logging.debug("Deleting archive directory " + archive_dir)
+        try:
+            shutil.rmtree(archive_dir)
+            logging.debug("Deleting archive directory " + archive_dir)
+        except Exception as e:
+            logging.error((
+                "Could not delete archive directory {} : {}"
+            ).format(archive_dir, str(e)))
     else:
         logging.debug("Cannot find archive directory " + archive_dir)
 
@@ -194,8 +199,13 @@ def remove_verification_files(backend_object, pr):
     verify_dir = get_verify_dir(backend_object, pr)
     # remove the directory
     if os.path.isdir(verify_dir):
-        shutil.rmtree(verify_dir)
-        logging.debug("Deleting verify directory " + verify_dir)
+        try:
+            shutil.rmtree(verify_dir)
+            logging.debug("Deleting verify directory " + verify_dir)
+        except Exception as e:
+            logging.error((
+                "Could not delete verify directory {} : {}"
+            ).format(verify_dir, str(e)))
     else:
         logging.debug("Cannot find verify directory " + verify_dir)
 
@@ -687,6 +697,29 @@ def FAILED_completed(backend_object, config):
                 ).format(fr.pk, fr.migration.external_id))
         except Exception as e:
             logging.error("FAILED: error in FAILED_completed {}".format(str(e)))
+
+    # look for FAILED_COMPLETED requests
+    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
+    fail_cmpl_reqs = MigrationRequest.objects.filter(
+        Q(migration__storage__storage=storage_id)
+        & Q(stage=MigrationRequest.FAILED_COMPLETED)
+    )
+    now = datetime.datetime.utcnow()
+    num_days = datetime.timedelta(days=config["COMPLETED_REQUEST_DAYS"])
+    #
+    for fr in fail_cmpl_reqs:
+        if not fr:
+            continue
+        try:
+            # remove the request if the requisite time has elapsed
+            if (now - fr.date).days > num_days.days:
+                logging.info("FAILED_COMPLETED: deleting request {}".format(fr.pk))
+                fr.delete()
+            else:
+                fr.unlock()
+
+        except Exception as e:
+            logging.error("FAILED_COMPLETED: error in FAILED_completed {}".format(str(e)))
 
 
 def process(backend, config):

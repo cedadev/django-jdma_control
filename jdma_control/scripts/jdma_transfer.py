@@ -38,6 +38,8 @@ def upload(backend_object, credentials, pr):
         error_string = (
             "No files in PUT or MIGRATE request: {} PUT_PENDING->FAILED"
         ).format(pr.migration.formatted_filelist()[0] + "...")
+        print(error_string)
+        logging.error(error_string)
         raise Exception(error_string)
     else:
         try:
@@ -377,7 +379,7 @@ def put_transfers(backend_object, key):
 def restore_owner_and_group_on_get(backend_object, gr):
     # change the owner, group and permissions of the file to match that
     # of the original from the user query
-    restore_owner_and_group(gr.migration, gr.target_path)
+    restore_owner_and_group(gr.migration, gr.target_path, gr.filelist)
 
     # if we reach this point then the restoration has finished.
     # next stage is tidy up

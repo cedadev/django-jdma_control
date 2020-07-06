@@ -64,18 +64,18 @@ def get_completed_puts(backend_object):
         # get the 2nd table - 1st is just a heading table
         table = bs.find_all("table")[1]
         if len(table) == 0:
-            return False
+            continue
 
         # get the first row
         rows = table.find_all("tr")
         if len(rows) < 2:
-            return False
+            continue
         row_1 = table.find_all("tr")[1]
 
         # the status is the first column
         cols = row_1.find_all("td")
         if len(cols) < 3:
-            return False
+            continue
         transfer_id = cols[0].get_text()
         status = cols[0].get_text()
         # check for completion
