@@ -582,7 +582,9 @@ class MigrationArchive(models.Model):
                 file_list[f.ftype].append(os.path.join(prefix, f.path))
             else:
                 if f.path in filter_list:
-                    file_list[f.ftype].append(os.path.join(prefix, f.path))
+                    full_path = os.path.join(prefix, f.path)
+                    if not full_path in file_list[f.ftype]:
+                        file_list[f.ftype].append(full_path)
         return file_list
     get_file_names.short_description= "Filelist"
 

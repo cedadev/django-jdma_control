@@ -39,7 +39,9 @@ class MigrationAdmin(admin.ModelAdmin):
                        'common_path', 'common_path_user_id',
                        'common_path_group_id', 'common_path_permission')
 
-    search_fields = ('user', 'label', 'workspace', 'stage', 'external_id')
+    search_fields = (
+        'user__name', 'label', 'workspace__workspace', 'stage', 'external_id'
+    )
     inlines = [MigrationArchiveInline]
 admin.site.register(Migration, MigrationAdmin)
 
@@ -67,7 +69,7 @@ class MigrationRequestAdmin(admin.ModelAdmin):
               'formatted_filelist', 'transfer_id', 'locked')
     readonly_fields = ('link_to_migration', 'credentials', #'last_archive',
                        'formatted_filelist', 'transfer_id')
-    search_fields = ('user',)
+    search_fields = ('user__name', 'target_path')
 
     def link_to_migration(self, obj):
         link = reverse('admin:jdma_control_migration_change',

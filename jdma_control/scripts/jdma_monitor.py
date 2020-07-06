@@ -32,127 +32,124 @@ def monitor_put(completed_PUTs, backend_object):
     VERIFY_PENDING (or FAILED)"""
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     # now loop over the PUT requests
-    pr = MigrationRequest.objects.filter(
+    pr_objs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
-        & Q(locked=False)
         & Q(stage=MigrationRequest.PUTTING)
         & Q(migration__stage=Migration.PUTTING)
         & Q(migration__storage__storage=storage_id)
-    ).first()
+    )
 
-    # This is the standard locking code.  See functions in "jdma_lock" for full
-    # details
-    if not pr:
-        return
-    if not pr.lock():
-        return
-    ###
+    for pr in pr_objs:
+        # This is the standard locking code.  See functions in "jdma_lock" for full
+        # details
+        if not pr:
+            return
+        pr.lock()
+        ###
 
-    # check whether it's in the completed_PUTs
-    if pr.migration.external_id in completed_PUTs:
-        # if it is then migrate to VERIFY_PENDING
-        pr.stage = MigrationRequest.VERIFY_PENDING
-        # reset the last_archive - needed for verify_get
-        pr.last_archive = 0
-        pr.save()
-        logging.info((
-            "Transition: request ID: {} external ID {} PUTTING->VERIFY_PENDING"
-        ).format(pr.pk, pr.migration.external_id))
-    pr.unlock()
+        # check whether it's in the completed_PUTs
+        if pr.migration.external_id in completed_PUTs:
+            # if it is then migrate to VERIFY_PENDING
+            pr.stage = MigrationRequest.VERIFY_PENDING
+            # reset the last_archive - needed for verify_get
+            pr.last_archive = 0
+            pr.save()
+            logging.info((
+                "Transition: request ID: {} external ID {} PUTTING->VERIFY_PENDING"
+            ).format(pr.pk, pr.migration.external_id))
+        pr.unlock()
 
 
 def monitor_get(completed_GETs, backend_object):
     """Monitor the GETs and transition from GETTING to ON_DISK (or FAILED)"""
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
 
-    gr = MigrationRequest.objects.filter(
+    gr_objs = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.GET)
-        & Q(locked=False)
         & Q(stage=MigrationRequest.GETTING)
         & Q(migration__storage__storage=storage_id)
-    ).first()
+    )
 
-    # This is the standard locking code.  See functions in "jdma_lock" for full
-    # details
-    if not gr:
-        return
-    if not gr.lock():
-        return
-    ###
+    for gr in gr_objs:
+        # This is the standard locking code.  See functions in "jdma_lock" for full
+        # details
+        if not gr:
+            return
+        gr.lock()
+        ###
 
-    if gr.transfer_id in completed_GETs:
-        # There may be multiple completed_GETs with external_id as Migrations
-        # can be downloaded by multiple MigrationRequests
-        # The only way to check is to make sure all the files in the
-        # original migration are present in the target_dir
-        gr.stage = MigrationRequest.GET_UNPACKING
-        # reset the last archive counter
-        gr.last_archive = 0
-        gr.save()
-        logging.info((
-            "Transition: request ID: {} GETTING->GET_UNPACKING"
-        ).format(gr.pk))
-    gr.unlock()
+        if gr.transfer_id in completed_GETs:
+            # There may be multiple completed_GETs with external_id as Migrations
+            # can be downloaded by multiple MigrationRequests
+            # The only way to check is to make sure all the files in the
+            # original migration are present in the target_dir
+            gr.stage = MigrationRequest.GET_UNPACKING
+            # reset the last archive counter
+            gr.last_archive = 0
+            gr.save()
+            logging.info((
+                "Transition: request ID: {} GETTING->GET_UNPACKING"
+            ).format(gr.pk))
+        gr.unlock()
 
 
 def monitor_verify(completed_GETs, backend_object):
     """Monitor the VERIFYs and transition from VERIFY_GETTING to VERIFYING"""
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
 
-    vr = MigrationRequest.objects.filter(
+    vr_objs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
-        & Q(locked=False)
         & Q(stage=MigrationRequest.VERIFY_GETTING)
         & Q(migration__storage__storage=storage_id)
-    ).first()
-    # This is the standard locking code.  See functions in "jdma_lock" for full
-    # details
-    if not vr:
-        return
-    if not vr.lock():
-        return
-    ###
+    )
 
-    if vr.transfer_id in completed_GETs:
-        vr.stage = MigrationRequest.VERIFYING
-        logging.info((
-            "Transition: request ID: {} external ID: {} VERIFY_GETTING->VERIFYING"
-        ).format(vr.pk, vr.transfer_id))
-        # reset the last archive counter
-        vr.last_archive = 0
-        vr.save()
-    vr.unlock()
+    for vr in vr_objs:
+        # This is the standard locking code.  See functions in "jdma_lock" for full
+        # details
+        if not vr:
+            return
+        vr.lock()
+        ###
+
+        if vr.transfer_id in completed_GETs:
+            vr.stage = MigrationRequest.VERIFYING
+            logging.info((
+                "Transition: request ID: {} external ID: {} VERIFY_GETTING->VERIFYING"
+            ).format(vr.pk, vr.transfer_id))
+            # reset the last archive counter
+            vr.last_archive = 0
+            vr.save()
+        vr.unlock()
 
 
 def monitor_delete(completed_DELETEs, backend_object):
     """Monitor the DELETEs and transition from DELETING to DELETE_TIDY"""
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
-    dr = MigrationRequest.objects.filter(
+    dr_objs = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.DELETE)
-        & Q(locked=False)
         & Q(stage=MigrationRequest.DELETING)
         & Q(migration__storage__storage=storage_id)
-    ).first()
+    )
 
-    # This is the standard locking code.  See functions in "jdma_lock" for full
-    # details
-    if not dr:
-        return
-    if not dr.lock():
-        return
-    ###
+    for dr in dr_objs:
+        # This is the standard locking code.  See functions in "jdma_lock" for full
+        # details
+        if not dr:
+            return
+        dr.lock()
+        ###
 
-    if dr.migration.external_id in completed_DELETEs:
-        dr.stage = MigrationRequest.DELETE_TIDY
-        logging.info((
-            "Transition: request ID: {} external ID: {} DELETING->DELETE_TIDY"
-        ).format(dr.pk, dr.migration.external_id))
-        # reset the last archive counter
-        dr.last_archive = 0
-        dr.save()
-    dr.unlock()
+        if dr.migration.external_id in completed_DELETEs:
+            dr.stage = MigrationRequest.DELETE_TIDY
+            logging.info((
+                "Transition: request ID: {} external ID: {} DELETING->DELETE_TIDY"
+            ).format(dr.pk, dr.migration.external_id))
+            # reset the last archive counter
+            dr.last_archive = 0
+            dr.save()
+        dr.unlock()
 
 
 def process(backend):

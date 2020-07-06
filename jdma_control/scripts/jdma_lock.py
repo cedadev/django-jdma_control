@@ -284,7 +284,7 @@ def lock_put_migrations(backend_object, config):
         return
     # carry out the lock migration
     try:
-        lock_put_migration(backend_object, pr)
+        lock_put_migration(pr, config)
         pr.unlock()
     except Exception as e:
         pr.unlock()

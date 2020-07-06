@@ -102,7 +102,7 @@ def get_file_info_tuple(filepath):
     )
 
 
-def restore_owner_and_group(mig, target_path):
+def restore_owner_and_group(mig, target_path, filelist=[]):
     # change the owner, group and permissions of the file to match that
     # of the original from the user query
 
@@ -126,6 +126,10 @@ def restore_owner_and_group(mig, target_path):
             # get the uid and gid
             uidNumber = mig_file.unix_user_id
             gidNumber = mig_file.unix_group_id
+
+            # check if in the filelist, if neccessary
+            if filelist != [] and mig_file.path not in filelist:
+                continue
 
             # form the file path
             file_path = os.path.join(
@@ -293,7 +297,7 @@ def get_archive_set_from_get_request(gr):
         archive_set = MigrationArchive.objects.filter(
             migration=gr.migration,
             migrationfile__path__in=filelist_no_cp
-        ).order_by('pk')
+        ).distinct().order_by('pk')
     # make sure we loop over all the archives in the (sub)set
     st_arch = 0#gr.last_archive
     n_arch = archive_set.count()
