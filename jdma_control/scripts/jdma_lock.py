@@ -48,7 +48,7 @@ def get_info_and_lock_file(user_name, files_dirs_list, q):
         except FileNotFoundError:
             # don't log in threads as it'll cause Quobyte to lock
             # instead create a FileInfo named tuple with some sentinel values
-            file_info = FileInfo(file_dir, -1, -1, -1, -1, -1, "MISS")
+            file_info = FileInfo(file_dir, -1, -1, "", -1, -1, -1, "MISS", "")
         else:
             file_infos.append(file_info)
     q.put(file_infos)
