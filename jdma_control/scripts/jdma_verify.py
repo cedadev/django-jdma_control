@@ -47,6 +47,9 @@ def verify_list_of_files(list_of_files, pr):
     for file_info in list_of_files:
         try:
             # calculate the new digest
+            logging.info((
+        	"VERIFYING file: {}"
+	    ).format(file_info.filepath))
             if file_info.digest_format == "ADLER32":
                 new_digest = calculate_digest_adler32(file_info.filepath)
             elif file_info.digest_format == "SHA256":
@@ -89,6 +92,11 @@ def verify(backend_object, pr, config):
     n_arch = archive_set.count()
     # build a list of files to verify, along with the digest calculated on
     # pack / upload
+
+    logging.info((
+        "VERIFYING files in PUT request ID: {} external ID: {}"
+    ).format(pr.pk, pr.migration.external_id))
+
     file_and_digest_list = []
     for arch_num in range(st_arch, n_arch):
         # determine which archive to stage (tar) and upload
@@ -125,6 +133,10 @@ def verify(backend_object, pr, config):
                 archive.pk
             )
             file_and_digest_list.append(verify_file_info)
+
+    logging.info((
+        "    Number of files: {}"
+    ).format(len(file_and_digest_list)))
 
     # now create a number of threads to check the digests
     if len(file_and_digest_list) > 0:
