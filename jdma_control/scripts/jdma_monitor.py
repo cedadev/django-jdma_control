@@ -35,6 +35,7 @@ def monitor_put(completed_PUTs, backend_object):
     pr_objs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
+#        & Q(locked=False)
         & Q(stage=MigrationRequest.PUTTING)
         & Q(migration__stage=Migration.PUTTING)
         & Q(migration__storage__storage=storage_id)
@@ -45,6 +46,8 @@ def monitor_put(completed_PUTs, backend_object):
         # details
         if not pr:
             return
+        # if not pr.lock():
+        #     return
         pr.lock()
         ###
 
@@ -67,6 +70,7 @@ def monitor_get(completed_GETs, backend_object):
 
     gr_objs = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.GET)
+#        & Q(locked=False)
         & Q(stage=MigrationRequest.GETTING)
         & Q(migration__storage__storage=storage_id)
     )
@@ -76,6 +80,8 @@ def monitor_get(completed_GETs, backend_object):
         # details
         if not gr:
             return
+        # if not gr.lock():
+        #     return
         gr.lock()
         ###
 
@@ -101,15 +107,17 @@ def monitor_verify(completed_GETs, backend_object):
     vr_objs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
+#        & Q(locked=False)
         & Q(stage=MigrationRequest.VERIFY_GETTING)
         & Q(migration__storage__storage=storage_id)
     )
-
     for vr in vr_objs:
         # This is the standard locking code.  See functions in "jdma_lock" for full
         # details
         if not vr:
             return
+        # if not vr.lock():
+        #     return
         vr.lock()
         ###
 
@@ -129,6 +137,7 @@ def monitor_delete(completed_DELETEs, backend_object):
     storage_id = StorageQuota.get_storage_index(backend_object.get_id())
     dr_objs = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.DELETE)
+        # & Q(locked=False)
         & Q(stage=MigrationRequest.DELETING)
         & Q(migration__storage__storage=storage_id)
     )
@@ -138,6 +147,8 @@ def monitor_delete(completed_DELETEs, backend_object):
         # details
         if not dr:
             return
+        # if not dr.lock():
+        #     return
         dr.lock()
         ###
 

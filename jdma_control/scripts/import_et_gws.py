@@ -34,7 +34,7 @@ def get_et_gws_from_url(url):
 def create_user_entry(line):
     # create a user (if it doesn't exist) and fill the data
     new_user = User.objects.filter(name=line[1])
-    user_found = len(new_user) != 0
+    user_found = new_user.count() != 0
     if not user_found:
         new_user = User()
         new_user.name = line[1]
@@ -45,7 +45,7 @@ def create_user_entry(line):
 
     # create a gws and fill the data (if not exist)
     new_gws = Groupworkspace.objects.filter(workspace=line[0])
-    gws_found = len(new_gws)
+    gws_found = new_gws.count()
     if not gws_found:
         new_gws = Groupworkspace()
         new_gws.save()
@@ -61,7 +61,7 @@ def create_quota_entry(storageid, new_gws, quota_size, quota_used):
     new_sq = StorageQuota.objects.filter(
         workspace=new_gws
     ).filter(storage=storageid)
-    sq_found = len(new_sq) != 0
+    sq_found = new_sq.count() != 0
     if not sq_found:
         new_sq = StorageQuota()
         new_sq.storage = storageid

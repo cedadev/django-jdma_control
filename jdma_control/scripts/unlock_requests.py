@@ -41,7 +41,6 @@ def run(*args):
     arg_dict = split_args(args)
     if "stage" in arg_dict:
         stage = get_stage(arg_dict["stage"])
-        
     else:
         raise Exception("stage argument not supplied")
 
