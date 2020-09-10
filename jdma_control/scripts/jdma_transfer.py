@@ -538,7 +538,6 @@ def delete_transfers(backend_object, key):
                     "Transition: request ID: {} external_id {}: DELETING->DELETE_TIDY"
                 ).format(dr.pk, dr.migration.external_id))
                 dr.save()
-            del_count += 1
         except Exception as e:
             # Something went wrong, set FAILED and failure_reason
             mark_migration_failed(dr, str(e), e, upload_mig=False)
