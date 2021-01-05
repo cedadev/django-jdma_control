@@ -128,7 +128,8 @@ def restore_owner_and_group(mig, target_path, filelist=[]):
             uidNumber = mig_file.unix_user_id
             gidNumber = mig_file.unix_group_id
             # check if in the filelist, if neccessary
-            if not(filelist == [] or filelist == None) and mig_file.path not in filelist:
+            if (not(filelist == [] or filelist == None) 
+                and mig_file.path not in filelist):
                 continue
 
             # form the file path
