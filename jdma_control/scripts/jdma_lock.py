@@ -251,6 +251,7 @@ def lock_put_migration(pr, config):
                  storage.quota_formatted_used(),
                  storage.quota_formatted_size(),
                  sizeof_fmt(total_size)))
+        pr.unlock()
         mark_migration_failed(pr, error_string, None)
     else:
         # set the MigrationRequest stage to be PUT_PACKING and the

@@ -65,7 +65,7 @@ def get_file_info_tuple(filepath):
     fstat = os.stat(filepath, follow_symlinks=False)
     size = fstat.st_size
     link_target = ""
-    # calc SHA256 digest
+    # calc digest
     if stat.S_ISLNK(fstat.st_mode):
         digest = 0
         digest_format = ""
@@ -88,7 +88,8 @@ def get_file_info_tuple(filepath):
     unix_group_id = fstat.st_gid
     # get the unix permissions
     unix_permission = "{}".format(oct(fstat.st_mode))
-    unix_permission = int(unix_permission[-3:])
+    # NRM - 04/01/2021 - retain the "sticky" bit
+    unix_permission = int(unix_permission[-4:])
     return FileInfo(
         filepath,
         size,
@@ -126,9 +127,8 @@ def restore_owner_and_group(mig, target_path, filelist=[]):
             # get the uid and gid
             uidNumber = mig_file.unix_user_id
             gidNumber = mig_file.unix_group_id
-
             # check if in the filelist, if neccessary
-            if filelist != [] and mig_file.path not in filelist:
+            if not(filelist == [] or filelist == None) and mig_file.path not in filelist:
                 continue
 
             # form the file path
