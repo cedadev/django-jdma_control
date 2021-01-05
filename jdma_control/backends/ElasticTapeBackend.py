@@ -147,7 +147,7 @@ def get_completed_gets(backend_object):
 
 
 def get_completed_deletes(backend_object):
-    """Get all the completed deletes for the ObjectStore"""
+    """Get all the completed deletes for the Elastic Tape"""
     # avoiding a circular dependency
     from jdma_control.models import MigrationRequest, Migration, StorageQuota    # get the storage id
     storage_id = StorageQuota.get_storage_index("elastictape")
@@ -470,7 +470,7 @@ class ElasticTapeBackend(Backend):
 
 
     def delete_batch(self, conn, del_req, batch_id):
-        """Delete a single tarred archive of files from the object store"""
+        """Delete a archive of files from the elastic tape"""
         conn.deleteBatchByID(conn.jdma_workspace,
                              conn.jdma_user,
                              int(batch_id))
