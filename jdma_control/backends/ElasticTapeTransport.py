@@ -103,6 +103,8 @@ def shutdown_handler(signum, frame):
         p.stop()
 
 def run(*args):
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
     shutdown = multiprocessing.Event()
     shutdown.clear()
 
