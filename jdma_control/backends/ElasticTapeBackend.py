@@ -60,7 +60,9 @@ def get_completed_puts(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise ETException(holdings_url + " is unreachable.")
+            # log error rather than raising exception
+            logging.error("Error in ET monitor:{} is unreachable".format(str(holdings_url)))
+            continue
 
         # get the 2nd table - 1st is just a heading table
         table = bs.find_all("table")[1]
@@ -116,7 +118,9 @@ def get_completed_gets(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise ETException(retrieval_url + " is unreachable.")
+            logging.error("Error in ET monitor:{} is unreachable".format(str(holdings_url)))
+            continue
+
         # get the 2nd table from beautiful soup
         table = bs.find_all("table")[1]
         # check that a table has been found - there might be a slight
@@ -177,7 +181,9 @@ def get_completed_deletes(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            raise ETException(holdings_url + " is unreachable.")
+            logging.error("Error in ET monitor:{} is unreachable".format(str(holdings_url)))
+            continue
+
         # if the dr.migration.external_id is not in the list of batches
         # then the delete has completed
         batches = bs.select("batch")
