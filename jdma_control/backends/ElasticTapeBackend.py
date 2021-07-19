@@ -12,6 +12,7 @@ import requests
 from bs4 import BeautifulSoup
 from time import sleep
 import subprocess
+import logging
 
 from jdma_control.backends.Backend import Backend
 from jdma_control.backends.ConnectionPool import ConnectionPool
@@ -290,14 +291,32 @@ class ElasticTapeBackend(Backend):
 
     def monitor(self, thread_number=None):
         """Determine which batches have completed."""
+        completed_PUTs = []
+        completed_GETs = []
+        completed_DELETEs = []
+
         try:
             completed_PUTs = get_completed_puts(self)
-            completed_GETs = get_completed_gets(self)
-            completed_DELETEs = get_completed_deletes(self)
         except SystemExit:
-            return [], [], []
+            completed_PUTs = []
         except ETException as e:
             logging.error("Error in ET monitor: {}".format(str(e)))
+
+
+        try:
+            completed_GETs = get_completed_gets(self)
+        except SystemExit:
+            completed_GETs = []
+        except ETException as e:
+            logging.error("Error in ET monitor: {}".format(str(e)))
+
+        try:
+            completed_DELETEs = get_completed_deletes(self)
+        except SystemExit:
+            completed_DELETEs = []
+        except ETException as e:
+            logging.error("Error in ET monitor: {}".format(str(e)))
+
         return completed_PUTs, completed_GETs, completed_DELETEs
 
     def pack_data(self):
