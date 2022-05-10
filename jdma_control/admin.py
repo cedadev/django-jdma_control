@@ -42,7 +42,7 @@ class MigrationAdmin(admin.ModelAdmin):
     search_fields = (
         'user__name', 'label', 'workspace__workspace', 'stage', 'external_id'
     )
-    inlines = [MigrationArchiveInline]
+    #inlines = [MigrationArchiveInline]
 admin.site.register(Migration, MigrationAdmin)
 
 

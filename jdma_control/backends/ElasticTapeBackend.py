@@ -50,6 +50,8 @@ def get_completed_puts(backend_object):
         & Q(migration__storage__storage=storage_id)
     )
     for pr in put_reqs:
+        if pr.migration.external_id is None:
+            continue
         # form the url and get the response, parse the document using bs4
         holdings_url = "{}?batch={}".format(
 	    ET_Settings["ET_INPUT_BATCH_SUMMARY_URL"],
@@ -106,6 +108,8 @@ def get_completed_gets(backend_object):
     #
     backend = ElasticTapeBackend()
     for gr in get_reqs:
+       	if gr.transfer_id is None:
+       	    continue
         # get a list of synced files for this workspace and user and batch
         retrieval_url = "{}?rr_id={};workspace={}".format(
             ET_Settings["ET_RETRIEVAL_URL"],

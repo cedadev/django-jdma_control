@@ -402,6 +402,7 @@ def get_transfers(backend_object, key):
         Q(request_type=MigrationRequest.GET)
         & Q(locked=False)
         & Q(migration__storage__storage=storage_id)
+        #& ~Q(user__name="n1280run")    # NRM 21/04/2022 - blocking this user name for now until disk cleared
         & Q(stage__in=[
               MigrationRequest.GET_PENDING,
               MigrationRequest.GETTING,
