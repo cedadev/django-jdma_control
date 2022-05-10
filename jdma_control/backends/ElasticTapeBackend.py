@@ -108,8 +108,8 @@ def get_completed_gets(backend_object):
     #
     backend = ElasticTapeBackend()
     for gr in get_reqs:
-       	if gr.transfer_id is None:
-       	    continue
+        if gr.transfer_id is None:
+            continue
         # get a list of synced files for this workspace and user and batch
         retrieval_url = "{}?rr_id={};workspace={}".format(
             ET_Settings["ET_RETRIEVAL_URL"],
@@ -378,6 +378,8 @@ class ElasticTapeBackend(Backend):
 
             # get the external id
             external_id = get_req.migration.external_id
+            if external_id is None:
+                return
             # Get the ip address of the sender
             ip = get_ip_address()
 
