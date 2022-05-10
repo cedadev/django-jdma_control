@@ -35,7 +35,7 @@ def monitor_put(completed_PUTs, backend_object):
     pr_objs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
-#        & Q(locked=False)
+        & Q(locked=False)
         & Q(stage=MigrationRequest.PUTTING)
         & Q(migration__stage=Migration.PUTTING)
         & Q(migration__storage__storage=storage_id)
@@ -46,9 +46,8 @@ def monitor_put(completed_PUTs, backend_object):
         # details
         if not pr:
             return
-        # if not pr.lock():
-        #     return
-        pr.lock()
+        if not pr.lock():
+            return
         ###
 
         # check whether it's in the completed_PUTs
@@ -70,7 +69,7 @@ def monitor_get(completed_GETs, backend_object):
 
     gr_objs = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.GET)
-#        & Q(locked=False)
+        & Q(locked=False)
         & Q(stage=MigrationRequest.GETTING)
         & Q(migration__storage__storage=storage_id)
     )
@@ -80,9 +79,8 @@ def monitor_get(completed_GETs, backend_object):
         # details
         if not gr:
             return
-        # if not gr.lock():
-        #     return
-        gr.lock()
+        if not gr.lock():
+            return
         ###
 
         if gr.transfer_id in completed_GETs:
@@ -107,7 +105,7 @@ def monitor_verify(completed_GETs, backend_object):
     vr_objs = MigrationRequest.objects.filter(
         (Q(request_type=MigrationRequest.PUT)
         | Q(request_type=MigrationRequest.MIGRATE))
-#        & Q(locked=False)
+        & Q(locked=False)
         & Q(stage=MigrationRequest.VERIFY_GETTING)
         & Q(migration__storage__storage=storage_id)
     )
@@ -116,9 +114,8 @@ def monitor_verify(completed_GETs, backend_object):
         # details
         if not vr:
             return
-        # if not vr.lock():
-        #     return
-        vr.lock()
+        if not vr.lock():
+            return
         ###
 
         if vr.transfer_id in completed_GETs:
@@ -147,9 +144,8 @@ def monitor_delete(completed_DELETEs, backend_object):
         # details
         if not dr:
             return
-        # if not dr.lock():
-        #     return
-        dr.lock()
+        if not dr.lock():
+            return
         ###
 
         if dr.migration.external_id in completed_DELETEs:

@@ -464,7 +464,6 @@ class MigrationRequest(models.Model):
         self.refresh_from_db()
         if self.stage != current_stage:
             return False
-        print("Locked : {}".format(self.pk))
         return updated
 
     def unlock(self):
@@ -472,7 +471,6 @@ class MigrationRequest(models.Model):
             filter(pk=self.pk, locked=True).
             update(locked=False)
         )
-        print("Unlocked : {}".format(self.pk))
         return bool(n_updated)
 
     def formatted_filelist(self):
