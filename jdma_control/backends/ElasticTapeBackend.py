@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from time import sleep
 import subprocess
 import logging
+from datetime import datetime
 
 from jdma_control.backends.Backend import Backend
 from jdma_control.backends.ConnectionPool import ConnectionPool
@@ -58,34 +59,76 @@ def get_completed_puts(backend_object):
             pr.migration.external_id
         )
         sleep(0.1)  # 100 ms delay to avoid overloading the server
+
         r = requests.get(holdings_url)
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
-        else:
-            # log error rather than raising exception
-            logging.error("Error in ET monitor:{} is unreachable".format(str(holdings_url)))
-            continue
 
+        # get all the tables and then check the 2nd
         # get the 2nd table - 1st is just a heading table
-        table = bs.find_all("table")[1]
-        if len(table) == 0:
-            continue
+        tables = bs.find_all("table")
+        if len(tables[1]) == 0:
+            return
 
-        # get the first row
-        rows = table.find_all("tr")
+        # get the first row of the 2nd table
+        rows = tables[1].find_all("tr")
         if len(rows) < 2:
-            continue
-        row_1 = table.find_all("tr")[1]
+            return
 
         # the status is the first column
-        cols = row_1.find_all("td")
+        cols = rows[1].find_all("td")
         if len(cols) < 3:
-            continue
-        transfer_id = cols[0].get_text()
+            return
+
         status = cols[0].get_text()
         # check for completion
         if status in ["SYNCED", "TAPED"]:
-            completed_PUTs.append(pr.migration.external_id)
+            # check for a pause - read the 1st (0) table as that has
+            # a "Last file loaded" date in the 6th column of the 2nd row
+            if len(tables[0]) == 0:
+                return
+            rows = tables[0].find_all("tr")
+            if len(rows) < 2:
+                return
+            # get the columns of the 2nd row
+            cols = rows[1].find_all("td")
+            if len(cols) < 6:
+                return
+            # get the time / date the file was loaded and convert to datetime
+            last_file_loaded = datetime.fromisoformat(cols[5].get_text())
+
+            # now check that time against now
+            now = datetime.now()
+            if (now - last_file_loaded).seconds > settings.VERIFY_PAUSE:
+                completed_PUTs.append(pr.migration.external_id)
+
+        # r = requests.get(holdings_url)
+        # if r.status_code == 200:
+        #     bs = BeautifulSoup(r.content, "xml")
+        # else:
+        #     # log error rather than raising exception
+        #     logging.error("Error in ET monitor:{} is unreachable".format(str(holdings_url)))
+        #     continue
+
+        # # get the 2nd table - 1st is just a heading table
+        # table = bs.find_all("table")[1]
+        # if len(table) == 0:
+        #     continue
+
+        # # get the first row
+        # rows = table.find_all("tr")
+        # if len(rows) < 2:
+        #     continue
+        # row_1 = table.find_all("tr")[1]
+
+        # # the status is the first column
+        # cols = row_1.find_all("td")
+        # if len(cols) < 3:
+        #     continue
+        # status = cols[0].get_text()
+        # # check for completion
+        # if status in ["SYNCED", "TAPED"]:
+        #     completed_PUTs.append(pr.migration.external_id)
 
     return completed_PUTs
 
