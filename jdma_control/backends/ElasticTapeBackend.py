@@ -69,17 +69,17 @@ def get_completed_puts(backend_object):
         # get the 2nd table - 1st is just a heading table
         tables = bs.find_all("table")
         if len(tables[1]) == 0:
-            return
+            continue
 
         # get the first row of the 2nd table
         rows = tables[1].find_all("tr")
         if len(rows) < 2:
-            return
+            continue
 
         # the status is the first column
         cols = rows[1].find_all("td")
         if len(cols) < 3:
-            return
+            continue
 
         status = cols[0].get_text()
         # check for completion
@@ -88,17 +88,17 @@ def get_completed_puts(backend_object):
             # a "Time to Tape" date in the 4th column of the 2nd row
             # we need to check every row to determine which is the latest time
             if len(tables[2]) == 0:
-                return
+                continue
             
             rows = tables[2].find_all("tr")
             if len(rows) < 2:
-                return
+                continue
             last_time_to_tape = datetime(year=1, month=1, day=1)
             # loop over each row
             for r in rows[1:]:
                 cols = r.find_all("td")
                 if len(cols) < 4:
-                    return
+                    continue
                 # get the time / date the file was loaded and convert to datetime
                 time_to_tape = dateutil.parser.isoparse(cols[3].get_text())
 
@@ -107,9 +107,9 @@ def get_completed_puts(backend_object):
 
             # now check that time against now
             delta = datetime.now() - last_time_to_tape
-            if (delta.days > 0) or (delta.seconds > settings.JDM_VERIFY_PAUSE):
-                print("Completed PUT")
-                #completed_PUTs.append(pr.migration.external_id)
+            if (delta.days > 0) or (delta.seconds > settings.JDMA_VERIFY_PAUSE):
+                #print("Completed PUT", pr.migration.external_id, "at", last_time_to_tape)
+                completed_PUTs.append(pr.migration.external_id)
 
     return completed_PUTs
 
