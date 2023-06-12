@@ -71,10 +71,12 @@ def create_quota_entry(storageid, new_gws, quota_size, quota_used):
         new_sq.save()
     else:
         new_sq = new_sq[0]
+        old_size = new_sq.quota_size
         # update quota if necessary
         new_sq.quota_size = quota_size
         new_sq.quota_used = quota_used
         new_sq.save()
+        logging.info(f"Modified quota for GWS: {new_gws} from: {old_size} to: {quota_size} with: {quota_used} used")
 
 
 def create_user_gws_quotas(data, config):
@@ -138,7 +140,9 @@ def run(*args):
     signal.signal(signal.SIGHUP, exit_handler)
     signal.signal(signal.SIGTERM, exit_handler)
 
+    logging.info("Getting data from URL: "+config["ET_EXPORT_URL"])
     data = get_et_gws_from_url(config["ET_EXPORT_URL"])
+    logging.info("Done")
 
     # decide whether to run as a daemon
     arg_dict = split_args(args)
