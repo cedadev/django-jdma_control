@@ -14,6 +14,7 @@ from time import sleep
 import subprocess
 import logging
 from datetime import datetime
+import dateutil.parser
 
 from jdma_control.backends.Backend import Backend
 from jdma_control.backends.ConnectionPool import ConnectionPool
@@ -95,40 +96,13 @@ def get_completed_puts(backend_object):
             if len(cols) < 6:
                 return
             # get the time / date the file was loaded and convert to datetime
-            last_file_loaded = datetime.fromisoformat(cols[5].get_text())
+            last_file_loaded = dateutil.parser.isoparse(cols[5].get_text())
 
             # now check that time against now
-            now = datetime.now()
-            if (now - last_file_loaded).seconds > settings.VERIFY_PAUSE:
-                completed_PUTs.append(pr.migration.external_id)
-
-        # r = requests.get(holdings_url)
-        # if r.status_code == 200:
-        #     bs = BeautifulSoup(r.content, "xml")
-        # else:
-        #     # log error rather than raising exception
-        #     logging.error("Error in ET monitor:{} is unreachable".format(str(holdings_url)))
-        #     continue
-
-        # # get the 2nd table - 1st is just a heading table
-        # table = bs.find_all("table")[1]
-        # if len(table) == 0:
-        #     continue
-
-        # # get the first row
-        # rows = table.find_all("tr")
-        # if len(rows) < 2:
-        #     continue
-        # row_1 = table.find_all("tr")[1]
-
-        # # the status is the first column
-        # cols = row_1.find_all("td")
-        # if len(cols) < 3:
-        #     continue
-        # status = cols[0].get_text()
-        # # check for completion
-        # if status in ["SYNCED", "TAPED"]:
-        #     completed_PUTs.append(pr.migration.external_id)
+            delta = datetime.now() - last_file_loaded
+            if (delta.days > 0) or (delta.seconds > settings.JDMA_VERIFY_PAUSE):
+                print("Completed PUT", pr.migration.external_id)
+                #completed_PUTs.append(pr.migration.external_id)
 
     return completed_PUTs
 
