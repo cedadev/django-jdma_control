@@ -84,24 +84,31 @@ def get_completed_puts(backend_object):
         status = cols[0].get_text()
         # check for completion
         if status in ["SYNCED", "TAPED"]:
-            # check for a pause - read the 1st (0) table as that has
-            # a "Last file loaded" date in the 6th column of the 2nd row
-            if len(tables[0]) == 0:
+            # check for a pause - read the 3rd (2) table as that has
+            # a "Time to Tape" date in the 4th column of the 2nd row
+            # we need to check every row to determine which is the latest time
+            if len(tables[2]) == 0:
                 return
-            rows = tables[0].find_all("tr")
+            
+            rows = tables[2].find_all("tr")
             if len(rows) < 2:
                 return
-            # get the columns of the 2nd row
-            cols = rows[1].find_all("td")
-            if len(cols) < 6:
-                return
-            # get the time / date the file was loaded and convert to datetime
-            last_file_loaded = dateutil.parser.isoparse(cols[5].get_text())
+            last_time_to_tape = datetime(year=1, month=1, day=1)
+            # loop over each row
+            for r in rows[1:]:
+                cols = r.find_all("td")
+                if len(cols) < 4:
+                    return
+                # get the time / date the file was loaded and convert to datetime
+                time_to_tape = dateutil.parser.isoparse(cols[3].get_text())
+
+                if time_to_tape > last_time_to_tape:
+                    last_time_to_tape = time_to_tape
 
             # now check that time against now
-            delta = datetime.now() - last_file_loaded
-            if (delta.days > 0) or (delta.seconds > settings.JDMA_VERIFY_PAUSE):
-                print("Completed PUT", pr.migration.external_id)
+            delta = datetime.now() - last_time_to_tape
+            if (delta.days > 0) or (delta.seconds > settings.JDM_VERIFY_PAUSE):
+                print("Completed PUT")
                 #completed_PUTs.append(pr.migration.external_id)
 
     return completed_PUTs
