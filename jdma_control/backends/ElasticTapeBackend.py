@@ -107,7 +107,7 @@ def get_completed_puts(backend_object):
 
             # now check that time against now
             delta = datetime.now() - last_time_to_tape
-            if (delta.days > 0) or (delta.seconds > settings.JDM_VERIFY_PAUSE):
+            if (delta.days > 0) or (delta.seconds > settings.JDMA_VERIFY_PAUSE):
                 print("Completed PUT")
                 #completed_PUTs.append(pr.migration.external_id)
 
