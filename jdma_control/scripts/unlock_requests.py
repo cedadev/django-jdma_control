@@ -44,6 +44,13 @@ def run(*args):
     else:
         raise Exception("stage argument not supplied")
 
+    if "put_stuck" in arg_dict:
+        put_stuck = True
+    else:
+        put_stuck = False
+
+    print(arg_dict)
+    print(put_stuck)
     pr = MigrationRequest.objects.filter(
          (Q(request_type=MigrationRequest.PUT)
          | Q(request_type=MigrationRequest.MIGRATE))
@@ -52,5 +59,11 @@ def run(*args):
     )
 
     for p in pr:
-        print("Unlocking : {} ".format(p.pk))
-        p.unlock()
+        # if stage is 'PUTTING' then unlock if there is an external id and put_stuck is true
+        if stage == get_stage('PUTTING') and put_stuck:
+            if p.migration.external_id is not None:
+                p.unlock()
+                print("Unlocking : {} ".format(p.pk))
+        else:    
+            p.unlock()
+            print("Unlocking : {} ".format(p.pk))

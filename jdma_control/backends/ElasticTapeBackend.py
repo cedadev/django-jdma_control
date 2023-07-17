@@ -111,6 +111,7 @@ def get_completed_puts(backend_object):
                 #print("Completed PUT ", pr.migration.external_id, "at", last_time_to_tape)
                 completed_PUTs.append(pr.migration.external_id)
 
+
     return completed_PUTs
 
 
