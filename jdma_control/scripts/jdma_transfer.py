@@ -151,75 +151,7 @@ def upload(backend_object, credentials, pr):
             raise Exception(error_string)
 
 
-def verify(backend_object, credentials, pr):
-    """Start the verification process.  Transition from
-    VERIFY_PENDING->VERIFY_GETTING and create the target directory.
-    Download the batch from the backend storage to the target directory
-    """
-    try:
-        # open a connection to the backend.  Creating the connection can account
-        # for a significant portion of the run time.  So we only do it once!
-        global connection_pool
-        conn = connection_pool.find_or_create_connection(
-            backend_object,
-            mig_req=pr,
-            credentials=credentials,
-            mode="download",
-            uid="VERIFY"
-        )
-        # Transition
-        pr.stage = MigrationRequest.VERIFY_GETTING
-        pr.save()
-        logging.info((
-            "Transition: request ID: {} external ID: {} VERIFY_PENDING->VERIFY_GETTING"
-        ).format(pr.pk, pr.migration.external_id))
-
-        # get the name of the verification directory
-        target_dir = get_verify_dir(backend_object, pr)
-        # create the target directory if it doesn't exist
-        os.makedirs(target_dir, exist_ok=True)
-
-        # for verify, we want to get the whole batch
-        # get the archive set
-        archive_set = pr.migration.migrationarchive_set.order_by('pk')
-
-        # add all the files in the archive to a file_list for downloading
-        file_list = []
-        for archive in archive_set:
-            # add files in this archive to those already added
-            if archive.packed:
-                archive_files = [archive.get_archive_name()]
-            else:
-                archive_files = archive.get_file_names()['FILE']
-            file_list.extend(archive_files)
-
-        logging.debug((
-            "Downloading files to verify: {} from {}"
-        ).format(file_list, backend_object.get_name()))
-
-        backend_object.download_files(
-            conn,
-            pr,
-            file_list = file_list,
-            target_dir = target_dir
-        )
-        connection_pool.close_connection(
-            backend_object,
-            pr,
-            credentials,
-            mode="download",
-            uid="VERIFY"
-        )
-    except Exception as e:
-        storage_name = StorageQuota.get_storage_name(
-            pr.migration.storage.storage
-        )
-        error_string = (
-            "Failed to download for verify the migration: {} "
-            "on external storage: {}. Exception: {}"
-        ).format(pr.migration.pk, storage_name, str(e))
-        raise Exception(error_string)
-
+# VERIFY is now handled by quick_verify.py - files are no longer retrieved, but the catalog is checked
 
 def download(backend_object, credentials, gr):
     """Start the download process.  Transition from
@@ -338,7 +270,6 @@ def put_transfers(backend_object, key):
         & Q(migration__storage__storage=storage_id)
         & Q(stage__in=[
             MigrationRequest.PUT_PENDING,
-            MigrationRequest.VERIFY_PENDING,
         ])
     ).first()
 
@@ -363,15 +294,7 @@ def put_transfers(backend_object, key):
         except Exception as e:
             # Something went wrong, set FAILED and failure_reason
             mark_migration_failed(pr, str(e), e)
-    # check if data is now on external storage and should be pulled
-    # back for verification
-    elif pr.stage == MigrationRequest.VERIFY_PENDING:
-        # pull back the data from the external storage
-        try:
-            verify(backend_object, credentials, pr)
-        except Exception as e:
-            # Something went wrong, set FAILED and failure_reason
-            mark_migration_failed(pr, str(e), e)
+    # verify is now handled by quick_verify.py - files are no longer fetched
     # unlock
     pr.unlock()
 

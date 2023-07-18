@@ -98,36 +98,7 @@ def monitor_get(completed_GETs, backend_object):
         gr.unlock()
 
 
-def monitor_verify(completed_GETs, backend_object):
-    """Monitor the VERIFYs and transition from VERIFY_GETTING to VERIFYING"""
-    storage_id = StorageQuota.get_storage_index(backend_object.get_id())
-
-    vr_objs = MigrationRequest.objects.filter(
-        (Q(request_type=MigrationRequest.PUT)
-        | Q(request_type=MigrationRequest.MIGRATE))
-        & Q(locked=False)
-        & Q(stage=MigrationRequest.VERIFY_GETTING)
-        & Q(migration__storage__storage=storage_id)
-    )
-    for vr in vr_objs:
-        # This is the standard locking code.  See functions in "jdma_lock" for full
-        # details
-        if not vr:
-            return
-        if not vr.lock():
-            return
-        ###
-
-        if vr.transfer_id in completed_GETs:
-            vr.stage = MigrationRequest.VERIFYING
-            logging.info((
-                "Transition: request ID: {} external ID: {} VERIFY_GETTING->VERIFYING"
-            ).format(vr.pk, vr.transfer_id))
-            # reset the last archive counter
-            vr.last_archive = 0
-            vr.save()
-        vr.unlock()
-
+# verify is now handled by quick_verify
 
 def monitor_delete(completed_DELETEs, backend_object):
     """Monitor the DELETEs and transition from DELETING to DELETE_TIDY"""
@@ -165,7 +136,6 @@ def process(backend):
     # monitor the puts and the gets
     monitor_put(completed_PUTs, backend_object)
     monitor_get(completed_GETs, backend_object)
-    monitor_verify(completed_GETs, backend_object)
     monitor_delete(completed_DELETEs, backend_object)
 
 

@@ -131,7 +131,6 @@ def get_completed_gets(backend_object):
         & Q(migration__storage__storage=storage_id)
     )
     #
-    backend = ElasticTapeBackend()
     for gr in get_reqs:
         if gr.transfer_id is None:
             continue
@@ -147,7 +146,7 @@ def get_completed_gets(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            logging.error("Error in ET monitor:{} is unreachable".format(str(holdings_url)))
+            logging.error("Error in ET monitor:{} is unreachable".format(str(retrieval_url)))
             continue
 
         # get the 2nd table from beautiful soup
@@ -485,6 +484,7 @@ class ElasticTapeBackend(Backend):
             raise Exception(str(e))
         return str(external_id)
 
+
     def upload_files(self, conn, put_req, prefix, file_list):
         """Create a batch on the elastic tape and upload the filenames.
         The batch id will be created and saved to the Migration.
@@ -530,6 +530,45 @@ class ElasticTapeBackend(Backend):
         conn.deleteBatchByID(conn.jdma_workspace,
                              conn.jdma_user,
                              int(batch_id))
+
+
+    def get_files(self, vr, batch_id):
+        """Simple version of verify - get the files in the batch from the HOLDINGS URL"""
+        ET_Settings = self.ET_Settings
+        holding_url = "{}?caller={}&workspace={}&batch={}&level=file".format(
+            ET_Settings["ET_HOLDINGS_URL"],
+            vr.user.name,
+            vr.migration.workspace,
+            batch_id,
+        )
+        sleep(0.1)
+        r = requests.get(holding_url)
+        if r.status_code == 200:
+            bs = BeautifulSoup(r.content, "xml")
+        else:
+            logging.error("Error in ET verify:{} is unreachable".format(str(holding_url)))
+            return False
+        fdict = {}
+
+        workspace = bs.find_all("et_wkspace")[0]
+        if len(workspace) == 0:
+            return fdict
+        batches = workspace.find_all("batches")[0]
+        if len(batches) == 0:
+            return fdict
+        batch = batches.find_all("batch")[0]
+        if len(batch) == 0:
+            return fdict
+        files = batch.find_all("file")
+        if len(files) == 0:
+            return fdict
+        for f in files:
+            name = f.find("file_name").get_text()
+            size = f.find("file_size").get_text()
+            fdict[name] = size
+
+        return fdict
+
 
     def user_has_put_permission(self, conn):
         """Check whether the user has permission to access the elastic tape,
