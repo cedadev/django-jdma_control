@@ -49,8 +49,6 @@ def run(*args):
     else:
         put_stuck = False
 
-    print(arg_dict)
-    print(put_stuck)
     pr = MigrationRequest.objects.filter(
          (Q(request_type=MigrationRequest.PUT)
          | Q(request_type=MigrationRequest.MIGRATE))
