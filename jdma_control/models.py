@@ -539,7 +539,7 @@ class MigrationArchive(models.Model):
         if q_set.count() == 0:
             return ""
         else:
-            fname = q_set[0].path
+            fname = q_set.first().path
             return str(q_set.count()) + " files. First file: " + fname
     first_file.short_description = "first_file"
 
