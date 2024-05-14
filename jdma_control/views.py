@@ -1096,8 +1096,7 @@ class MigrationView(View):
                 migration_id = None
 
             try:
-                migration = Migration.objects.filter(
-                    **keyargs).order_by('stage').first()
+                migration = Migration.objects.filter(**keyargs).order_by('stage')[0]
             except Exception:
                 # return error as easily interpreted JSON
                 error_data = {"error": "Batch not found.",
