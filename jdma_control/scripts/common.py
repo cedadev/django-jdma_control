@@ -14,8 +14,7 @@ import socket
 FileInfo = namedtuple('FileInfo',
                       ['filepath', 'size', 'digest', 'digest_format',
                        'unix_user_id', 'unix_group_id', 'unix_permission',
-                       'ftype', 'link_target'],
-                       verbose=False)
+                       'ftype', 'link_target'])
 
 def split_args(args):
     # split args that are in the form somekey=somevalue into a dictionary

@@ -21,7 +21,7 @@ setup(
         'django-sizefield',
         'html5lib',
         'lxml',
-        'jasmin-ldap',
+        'jasmin-ldap @ git+https://github.com/cedadev/jasmin-ldap.git@v1.0.2#egg=jasmin_ldap',
         'packaging',
         'psycopg2-binary',
         'pycryptodome',
