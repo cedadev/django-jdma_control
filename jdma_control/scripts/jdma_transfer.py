@@ -37,8 +37,7 @@ def upload(backend_object, credentials, pr):
     if pr.migration.migrationarchive_set.all().count() == 0:
         error_string = (
             "No files in PUT or MIGRATE request: {} PUT_PENDING->FAILED"
-        ).format(pr.migration.formatted_filelist()[0] + "...")
-        print(error_string)
+        ).format(pr.pk)
         logging.error(error_string)
         raise Exception(error_string)
     else:
