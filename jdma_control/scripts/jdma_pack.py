@@ -340,6 +340,7 @@ def get_unpacking(backend_object, config):
     # Get the GET requests for this backend which are in the PACKING stage.
     gr = MigrationRequest.objects.filter(
         Q(request_type=MigrationRequest.GET)
+        & Q(locked=False)
         & Q(migration__storage__storage=storage_id)
         & Q(stage=MigrationRequest.GET_UNPACKING)
     ).first()

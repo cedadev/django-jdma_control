@@ -18,6 +18,7 @@ def get_et_gws_from_url(url):
     # Fetch the (plain text) file of the gws and et quotas
     # the format is:
     # gws_name, user_name of manager, quota in bytes, email address of manager
+    print(f"Fetching ET information from {url}")
     response = requests.get(url)
     if response.status_code == 200:
         data = response.content.decode('utf-8')

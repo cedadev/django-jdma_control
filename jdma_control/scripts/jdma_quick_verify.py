@@ -49,12 +49,14 @@ def verify(backend_object, pr, config):
                             if int(f.size) == int(files[full_path]):
                                 file_count += 1
                             else:
-                                print(f.size, files[full_path])
+                                print(f"Error with file: {f.path}. expected size: {f.size}, actual size: {files[full_path]}")
 
     if file_count == len(files):
+        print("    Verification successful")
         pr.stage = MigrationRequest.PUT_TIDY
         pr.save()
     else:
+        print(f"    Verification failed, expected files: {len(files)}, actual files: {file_count}")
         pr.stage = MigrationRequest.FAILED
         pr.failure_reason = "Verification failed"
         pr.save()
