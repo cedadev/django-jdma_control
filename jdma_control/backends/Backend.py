@@ -103,11 +103,11 @@ class Backend(object):
             ).filter(cn="gws_" + workspace)
 
             # check for a valid return
-            if query.count() == 0:
+            if len(query) == 0:
                 return False
 
             # check that user is in this workspace
-            if username not in query.first()['memberUid']:
+            if username not in query[0]['memberUid']:
                 return False
         return True
 
@@ -137,11 +137,11 @@ class Backend(object):
             ).filter(cn="gws_" + workspace)
 
             # check for a valid return
-            if query.count() == 0:
+            if len(query) == 0:
                 return False
 
             # check the user is in the workspace
-            if username not in query.first()['memberUid']:
+            if username not in query[0]['memberUid']:
                 return False
 
         return True
@@ -169,11 +169,11 @@ class Backend(object):
             ).filter(cn="gws_" + workspace)
 
             # check for a valid return
-            if query.count() == 0:
+            if len(query) == 0:
                 return False
 
             # check the user is in the workspace
-            if username not in query.first()['memberUid']:
+            if username not in query[0]['memberUid']:
                 return False
 
         # get the migration

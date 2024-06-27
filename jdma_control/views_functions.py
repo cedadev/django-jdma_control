@@ -80,13 +80,13 @@ def user_has_write_permission(path, user):
             ).filter(gidNumber=group)
 
             # check for a valid return
-            if query.count() == 0:
+            if len(query) == 0:
                 logging.error((
                     "Group with gidNumber: {} not found from LDAP"
                 ).format(group))
                 return False
 
-            if query.count() != 0 and user in query.first()['memberUid']:
+            if query.count() != 0 and user in query[0]['memberUid']:
                 return True
         # check for user
         if "wx" in ls_res.mode[0] or "ws" in ls_res.mode[0]:
@@ -96,13 +96,13 @@ def user_has_write_permission(path, user):
                 conn,
                 base_dn=settings.JDMA_LDAP_BASE_USER
             ).filter(uid=user)
-            if query.count() == 0:
+            if len(query) == 0:
                 logging.error((
                     "Unix user id: {} not found from LDAP in "
                     "UserHasWritePermission"
                 ).format(user))
                 return False
-            if ls_res.uid == query.first()["uidNumber"][0]:
+            if ls_res.uid == query[0]["uidNumber"][0]:
                 return True
     return False
 
