@@ -33,4 +33,4 @@ urllib3==2.2.1
 webencodings==0.5.1
 
 -e git+https://github.com/cedadev/jasmin-ldap.git@9v1.0.2#egg=jasmin_ldap
--e svn+https://svn.esc.rl.ac.uk/repos/jasmin_et/code/tags/0.3.1.3_Py3.6Specific/elastic_tape#egg=elastic_tape
+-e svn+https://svn.esc.rl.ac.uk/repos/jasmin_et/code/tags/1.0.0.1/elastic_tape#egg=elastic_tape
