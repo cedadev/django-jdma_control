@@ -4,7 +4,7 @@ import signal
 from time import sleep
 import random
 
-from jdma_transfer import put_transfers
+from jdma_control.scripts.jdma_transfer import put_transfers
 
 import jdma_site.settings as settings
 import jdma_control.backends.AES_tools as AES_tools
