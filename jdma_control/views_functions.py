@@ -86,7 +86,7 @@ def user_has_write_permission(path, user):
                 ).format(group))
                 return False
 
-            if query.count() != 0 and user in query[0]['memberUid']:
+            if len(query) != 0 and user in query[0]['memberUid']:
                 return True
         # check for user
         if "wx" in ls_res.mode[0] or "ws" in ls_res.mode[0]:

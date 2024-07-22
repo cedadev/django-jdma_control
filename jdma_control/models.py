@@ -435,15 +435,15 @@ class MigrationRequest(models.Model):
         # check that the stage isn't changed while we're accessing and waiting
         # for the db
         current_stage = self.stage
-        updated = bool(
-            MigrationRequest.objects.filter(pk=self.pk, locked=False).update(
-                locked=True
-            )
-        )
+        current_locked = self.locked
+        self.locked = True
+        self.save()
         self.refresh_from_db()
         if self.stage != current_stage:
+            self.locked = current_locked
+            self.save()
             return False
-        return updated
+        return self.lock != current_locked
 
     def unlock(self):
         n_updated = MigrationRequest.objects.filter(pk=self.pk, locked=True).update(
