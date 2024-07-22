@@ -44,13 +44,13 @@ def run(*args):
     # setup the logging
     # setup exit signal handling
     global connection_pool
-    config = read_process_config("jdma_transfer")
+    config = read_process_config("jdma_put_transfer")
     logging.basicConfig(
         format=get_logging_format(),
         level=get_logging_level(config["LOG_LEVEL"]),
         datefmt='%Y-%d-%m %I:%M:%S'
     )
-    logging.info("Starting jdma_transfer")
+    logging.info("Starting jdma_put_transfer")
 
     # remap signals to shutdown handler which in turn calls sys.exit(0)
     # and raises SystemExit exception
