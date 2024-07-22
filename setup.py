@@ -22,7 +22,7 @@ setup(
         'html5lib',
         'lxml',
         'jasmin-ldap @ git+https://github.com/cedadev/jasmin-ldap.git@v1.0.2#egg=jasmin_ldap',
-        'elastic-tape @ svn+https://svn.esc.rl.ac.uk/repos/jasmin_et/code/tags/1.0.0.1/elastic_tape#egg=elastic_tape',
+        # 'elastic-tape @ svn+https://svn.esc.rl.ac.uk/repos/jasmin_et/code/tags/1.0.0.1/elastic_tape#egg=elastic_tape',
         'packaging',
         'psycopg2-binary',
         'pycryptodome',
