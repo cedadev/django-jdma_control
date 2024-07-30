@@ -28,3 +28,4 @@ soupsieve==2.5
 sqlparse==0.5.1
 urllib3==2.2.2
 webencodings==0.5.1
+jasmin-ldap @ git+https://github.com/cedadev/jasmin-ldap.git@v1.0.2#egg=jasmin-ldap
