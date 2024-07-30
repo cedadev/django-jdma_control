@@ -9,25 +9,25 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 
 setup(
     name='jdma_control',
-    version='0.2.27',
+    version='1.0.1',
     packages=['jdma_control'],
     install_requires=[
         'appdirs',
         'beautifulsoup4',
         'boto3',
-        'django',
+        'django==4.2',
         'django-extensions',
         'django-multiselectfield',
         'django-sizefield',
         'html5lib',
         'lxml',
-        'jasmin-ldap',
         'packaging',
         'psycopg2-binary',
         'pycryptodome',
         'pyparsing',
         'pytz',
-        'requests'
+        'requests',
+        "jasmin-ldap @ git+https://github.com/cedadev/jasmin-ldap.git@v1.0.2#egg=jasmin-ldap"
     ],
     include_package_data=True,
     license='my License',  # example license
@@ -44,10 +44,9 @@ setup(
         'License :: OSI Approved :: BSD License',  # example license
         'Operating System :: OS Independent',
         'Programming Language :: Python',
-        # Replace these appropriately if you are stuck on Python 2.
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 2.6',
-        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.11',
         'Topic :: Internet :: WWW/HTTP',
         'Topic :: Internet :: WWW/HTTP :: Dynamic Content',
     ],

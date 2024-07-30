@@ -183,7 +183,7 @@ class UserView(View):
 
         # check if user already exists
         user_query = User.objects.filter(name=username)
-        if len(user_query) != 0:
+        if user_query.count() != 0:
             error_data["error"] = "JDMA already initialized for this user."
             return HttpError(error_data, status=403)
         # create user object
@@ -435,13 +435,13 @@ class MigrationRequestView(View):
                 workspace = request.GET.get("workspace")
                 # get the workspace object
                 gws = Groupworkspace.objects.filter(workspace=workspace)
-                if len(gws) == 0:
+                if gws.count() == 0:
                     error_data = {"error": "Workspace not found.",
                                   "name": name}
                     error_data["workspace"] = workspace
                     return HttpError(error_data, status=404)
                 else:
-                    keyargs["migration__workspace"] = gws[0]
+                    keyargs["migration__workspace"] = gws.first()
             else:
                 workspace = None
 
@@ -699,7 +699,7 @@ class MigrationRequestView(View):
                     target_path=target_path,
                     filelist=filelist,
                 ).exclude(stage=MigrationRequest.GET_COMPLETED)
-                if len(dup_req) != 0:
+                if dup_req.count() != 0:
                     error_data["error"] = (
                         "Duplicate GET request made: batch: {}, Target path: {}"
                     ).format(data["migration_id"], target_path)
@@ -786,7 +786,7 @@ class MigrationRequestView(View):
                 workspace_qs = Groupworkspace.objects.filter(
                     workspace=data["workspace"]
                 )
-                if len(workspace_qs) == 0:
+                if workspace_qs.count() == 0:
                     error_data["error"] = (
                         "Workspace {} has no associated groupworkspace quota set"
                     ).format(data["workspace"])
@@ -809,10 +809,10 @@ class MigrationRequestView(View):
                     migration__stage__lt=Migration.DELETED
                 )
                 # get the first file
-                if len(mr_qs) > 0:
+                if mr_qs.count() > 0:
                     error_data["error"] = (
                         "Filelist or directory {}... is already in a migration {}"
-                    ).format(data["filelist"][0], mr_qs)
+                    ).format(data["filelist"].first(), mr_qs)
                     return HttpError(error_data, status=403)
 
                 # check for the label in the request - if not then derive from
@@ -820,7 +820,7 @@ class MigrationRequestView(View):
                 if "label" in data:
                     label = data["label"]
                 else:
-                    label = data["filelist"][0].split("/")[-1]
+                    label = data["filelist"].first().split("/")[-1]
 
                 # check the storage is in the request
                 if "storage" not in data:
@@ -881,10 +881,10 @@ class MigrationRequestView(View):
 
                 # get the storage quota
                 storage_qs = StorageQuota.objects.filter(
-                    workspace=workspace_qs[0],
+                    workspace=workspace_qs.first(),
                     storage=StorageQuota.get_storage_index(data["storage"])
                 )
-                if len(storage_qs) == 0:
+                if storage_qs.count() == 0:
                     error_data["error"] = (
                         "External storage: {} has not been attached "
                         "to the groupworkspace: {}"
@@ -896,7 +896,7 @@ class MigrationRequestView(View):
                 # create a connection to the backend using the credentials
                 conn = JDMA_BACKEND_OBJECT.create_connection(
                     user.name,
-                    workspace_qs[0],
+                    workspace_qs.first(),
                     credentials
                 )
 
@@ -931,7 +931,7 @@ class MigrationRequestView(View):
 
                 # Assign the data passed in / derived above
                 migration.label = label
-                migration.workspace = workspace_qs[0]
+                migration.workspace = workspace_qs.first()
 
                 # Assign the stage, this is always on disk at this stage for a PUT
                 migration.stage = Migration.ON_DISK
@@ -940,7 +940,7 @@ class MigrationRequestView(View):
                 migration.registered_date = cdate
 
                 # external storage
-                migration.storage = storage_qs[0]
+                migration.storage = storage_qs.first()
 
                 # save the migration to the database
                 migration.save()
@@ -1023,7 +1023,7 @@ class MigrationRequestView(View):
                     migration=migration,
                     request_type=MigrationRequest.DELETE,
                 )
-                if len(dup_req) != 0:
+                if dup_req.count() != 0:
                     error_data["error"] = (
                         "Duplicate DELETE request made: batch: {}"
                     ).format(data["migration_id"])
@@ -1096,7 +1096,7 @@ class MigrationView(View):
                 migration_id = None
 
             try:
-                migration = Migration.objects.get(**keyargs)
+                migration = Migration.objects.filter(**keyargs).order_by('stage')[0]
             except Exception:
                 # return error as easily interpreted JSON
                 error_data = {"error": "Batch not found.",
@@ -1145,13 +1145,13 @@ class MigrationView(View):
                 workspace = request.GET.get("workspace")
                 # get the workspace object
                 gws = Groupworkspace.objects.filter(workspace=workspace)
-                if len(gws) == 0:
+                if gws.count() == 0:
                     error_data = {"error": "Workspace not found.",
                                   "name": name}
                     error_data["workspace"] = workspace
                     return HttpError(error_data)
                 else:
-                    keyargs["workspace"] = gws[0]
+                    keyargs["workspace"] = gws.first()
             else:
                 workspace = None
 
@@ -1312,13 +1312,13 @@ class MigrationFileView(View):
             workspace = request.GET.get("workspace")
             # get the workspace object
             gws = Groupworkspace.objects.filter(workspace=workspace)
-            if len(gws) == 0:
+            if gws.count() == 0:
                 error_data = {"error": "Workspace not found.",
                               "name": user_name}
                 error_data["workspace"] = workspace
                 return HttpError(error_data,status=404)
             else:
-                keyargs["workspace"] = gws[0]
+                keyargs["workspace"] = gws.first()
         else:
             workspace = None
 
@@ -1486,13 +1486,13 @@ class MigrationArchiveView(View):
             workspace = request.GET.get("workspace")
             # get the workspace object
             gws = Groupworkspace.objects.filter(workspace=workspace)
-            if len(gws) == 0:
+            if gws.count() == 0:
                 error_data = {"error": "Workspace not found.",
                               "name": user_name}
                 error_data["workspace"] = workspace
                 return HttpError(error_data,status=404)
             else:
-                keyargs["workspace"] = gws[0]
+                keyargs["workspace"] = gws.first()
         else:
             workspace = None
 

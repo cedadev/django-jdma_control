@@ -13,6 +13,8 @@ from bs4 import BeautifulSoup
 from time import sleep
 import subprocess
 import logging
+from datetime import datetime
+import dateutil.parser
 
 from jdma_control.backends.Backend import Backend
 from jdma_control.backends.ConnectionPool import ConnectionPool
@@ -58,34 +60,57 @@ def get_completed_puts(backend_object):
             pr.migration.external_id
         )
         sleep(0.1)  # 100 ms delay to avoid overloading the server
+
         r = requests.get(holdings_url)
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
-        else:
-            # log error rather than raising exception
-            logging.error("Error in ET monitor:{} is unreachable".format(str(holdings_url)))
-            continue
 
+        # get all the tables and then check the 2nd
         # get the 2nd table - 1st is just a heading table
-        table = bs.find_all("table")[1]
-        if len(table) == 0:
+        tables = bs.find_all("table")
+        if len(tables[1]) == 0:
             continue
 
-        # get the first row
-        rows = table.find_all("tr")
+        # get the first row of the 2nd table
+        rows = tables[1].find_all("tr")
         if len(rows) < 2:
             continue
-        row_1 = table.find_all("tr")[1]
 
         # the status is the first column
-        cols = row_1.find_all("td")
+        cols = rows[1].find_all("td")
         if len(cols) < 3:
             continue
-        transfer_id = cols[0].get_text()
+
         status = cols[0].get_text()
         # check for completion
         if status in ["SYNCED", "TAPED"]:
-            completed_PUTs.append(pr.migration.external_id)
+            # check for a pause - read the 3rd (2) table as that has
+            # a "Time to Tape" date in the 4th column of the 2nd row
+            # we need to check every row to determine which is the latest time
+            if len(tables[2]) == 0:
+                continue
+            
+            rows = tables[2].find_all("tr")
+            if len(rows) < 2:
+                continue
+            last_time_to_tape = datetime(year=1, month=1, day=1)
+            # loop over each row
+            for r in rows[1:]:
+                cols = r.find_all("td")
+                if len(cols) < 4:
+                    continue
+                # get the time / date the file was loaded and convert to datetime
+                time_to_tape = dateutil.parser.isoparse(cols[3].get_text())
+
+                if time_to_tape > last_time_to_tape:
+                    last_time_to_tape = time_to_tape
+
+            # now check that time against now - adjust for timezone
+            delta = datetime.now() - last_time_to_tape
+            if (delta.days > 0) or (delta.seconds > settings.JDMA_VERIFY_PAUSE):
+                #print("Completed PUT ", pr.migration.external_id, "at", last_time_to_tape)
+                completed_PUTs.append(pr.migration.external_id)
+
 
     return completed_PUTs
 
@@ -106,7 +131,6 @@ def get_completed_gets(backend_object):
         & Q(migration__storage__storage=storage_id)
     )
     #
-    backend = ElasticTapeBackend()
     for gr in get_reqs:
         if gr.transfer_id is None:
             continue
@@ -122,7 +146,7 @@ def get_completed_gets(backend_object):
         if r.status_code == 200:
             bs = BeautifulSoup(r.content, "xml")
         else:
-            logging.error("Error in ET monitor:{} is unreachable".format(str(holdings_url)))
+            logging.error("Error in ET monitor:{} is unreachable".format(str(retrieval_url)))
             continue
 
         # get the 2nd table from beautiful soup
@@ -460,6 +484,7 @@ class ElasticTapeBackend(Backend):
             raise Exception(str(e))
         return str(external_id)
 
+
     def upload_files(self, conn, put_req, prefix, file_list):
         """Create a batch on the elastic tape and upload the filenames.
         The batch id will be created and saved to the Migration.
@@ -505,6 +530,45 @@ class ElasticTapeBackend(Backend):
         conn.deleteBatchByID(conn.jdma_workspace,
                              conn.jdma_user,
                              int(batch_id))
+
+
+    def get_files(self, vr, batch_id):
+        """Simple version of verify - get the files in the batch from the HOLDINGS URL"""
+        ET_Settings = self.ET_Settings
+        holding_url = "{}?caller={}&workspace={}&batch={}&level=file".format(
+            ET_Settings["ET_HOLDINGS_URL"],
+            vr.user.name,
+            vr.migration.workspace,
+            batch_id,
+        )
+        sleep(0.1)
+        r = requests.get(holding_url)
+        if r.status_code == 200:
+            bs = BeautifulSoup(r.content, "xml")
+        else:
+            logging.error("Error in ET verify:{} is unreachable".format(str(holding_url)))
+            return False
+        fdict = {}
+
+        workspace = bs.find_all("et_wkspace")[0]
+        if len(workspace) == 0:
+            return fdict
+        batches = workspace.find_all("batches")[0]
+        if len(batches) == 0:
+            return fdict
+        batch = batches.find_all("batch")[0]
+        if len(batch) == 0:
+            return fdict
+        files = batch.find_all("file")
+        if len(files) == 0:
+            return fdict
+        for f in files:
+            name = f.find("file_name").get_text()
+            size = f.find("file_size").get_text()
+            fdict[name] = size
+
+        return fdict
+
 
     def user_has_put_permission(self, conn):
         """Check whether the user has permission to access the elastic tape,

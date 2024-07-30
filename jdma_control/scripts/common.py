@@ -14,8 +14,7 @@ import socket
 FileInfo = namedtuple('FileInfo',
                       ['filepath', 'size', 'digest', 'digest_format',
                        'unix_user_id', 'unix_group_id', 'unix_permission',
-                       'ftype', 'link_target'],
-                       verbose=False)
+                       'ftype', 'link_target'])
 
 def split_args(args):
     # split args that are in the form somekey=somevalue into a dictionary
@@ -124,6 +123,8 @@ def restore_owner_and_group(mig, target_path, filelist=[]):
         # which are created before the "L"INKS
         mig_files = archive.migrationfile_set.all().order_by("ftype")
         for mig_file in mig_files:
+            if not mig_file:
+                continue
             # get the uid and gid
             uidNumber = mig_file.unix_user_id
             gidNumber = mig_file.unix_group_id
@@ -214,20 +215,21 @@ def restore_owner_and_group(mig, target_path, filelist=[]):
                 )
     # restore the target_path
     # change the directory owner / group
-    subprocess.call(
-        ["/usr/bin/sudo",
-         "/bin/chown",
-         str(mig.common_path_user_id)+":"+str(mig.common_path_group_id),
-         target_path]
-    )
+    if target_path:
+        subprocess.call(
+            ["/usr/bin/sudo",
+             "/bin/chown",
+             str(mig.common_path_user_id)+":"+str(mig.common_path_group_id),
+             target_path]
+        )
 
-    # change the permissions back to the original
-    subprocess.call(
-        ["/usr/bin/sudo",
-         "/bin/chmod",
-         str(mig.common_path_permission),
-         target_path]
-    )
+        # change the permissions back to the original
+        subprocess.call(
+            ["/usr/bin/sudo",
+             "/bin/chmod",
+             str(mig.common_path_permission),
+             target_path]
+        )
 
 
 def mark_migration_failed(mig_req, failure_reason, e_inst=None, upload_mig=True):
