@@ -11,8 +11,6 @@ django-multiselectfield==0.1.13
 django-sizefield==2.1.0
 html5lib==1.1
 idna==3.7
-jasmin-ldap @ git+https://github.com/cedadev/jasmin-ldap.git@c8bd7b4be00bc80105b475b809a00e9855a415ab
--e git+ssh://git@github.com/cedadev/django-jdma_control.git@f30737478b8d7cb06d7ecc9edc06fdf086a94bfc#egg=jdma_control
 jmespath==1.0.1
 ldap3==2.9.1
 lxml==5.2.2
@@ -24,7 +22,9 @@ pyparsing==3.1.2
 python-dateutil==2.9.0.post0
 pytz==2024.1
 requests==2.32.3
-s3transfer==0
-
--e git+https://github.com/cedadev/jasmin-ldap.git@9v1.0.2#egg=jasmin_ldap
--e svn+https://svn.esc.rl.ac.uk/repos/jasmin_et/code/tags/1.0.0.1/elastic_tape#egg=elastic_tape
+s3transfer==0.10.2
+six==1.16.0
+soupsieve==2.5
+sqlparse==0.5.1
+urllib3==2.2.2
+webencodings==0.5.1
