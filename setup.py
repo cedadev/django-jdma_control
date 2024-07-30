@@ -9,13 +9,13 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 
 setup(
     name="jdma_control",
-    version="1.0.1",
+    version="1.0.2",
     packages=find_packages(),
     install_requires=[
         "appdirs",
         "beautifulsoup4",
         "boto3",
-        "django==4.2.15",
+        "django==4.2.14",
         "django-extensions",
         "django-multiselectfield",
         "django-sizefield",
