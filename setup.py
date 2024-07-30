@@ -15,7 +15,7 @@ setup(
         "appdirs",
         "beautifulsoup4",
         "boto3",
-        "django==4.2",
+        "django==4.2.15",
         "django-extensions",
         "django-multiselectfield",
         "django-sizefield",
