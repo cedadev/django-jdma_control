@@ -1,8 +1,7 @@
 from django.views.generic import View
 from jdma_control.models import *
 from jdma_control.views_functions import *
-from datetime import datetime
-import subprocess
+from datetime import datetime, timezone
 
 import jdma_site.settings as settings
 import jdma_control.backends
@@ -605,7 +604,7 @@ class MigrationRequestView(View):
             data["request_type"]
         ]
         # get the date
-        cdate = datetime.utcnow()
+        cdate = datetime.now(timezone.utc)
         # set the date
         migration_request.date = cdate
 
