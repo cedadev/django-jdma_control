@@ -9,7 +9,7 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 
 setup(
     name="jdma_control",
-    version="1.0.6",
+    version="1.0.7",
     packages=find_packages(),
     install_requires=[
         "appdirs",
