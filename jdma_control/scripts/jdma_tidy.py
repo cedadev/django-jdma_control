@@ -10,6 +10,7 @@ import signal,sys
 from time import sleep
 import random
 import datetime
+from datetime import timezone
 from multiprocessing import Process
 
 from django.db.models import Q
@@ -571,7 +572,7 @@ def PUT_completed(backend_object, config):
         return
     if not pr.lock():
         return
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(timezone.utc)
     num_days = datetime.timedelta(days=config["COMPLETED_REQUEST_DAYS"])
     try:
         # remove the request if the requisite time has elapsed
@@ -596,7 +597,7 @@ def GET_completed(backend_object, config):
         & Q(migration__storage__storage=storage_id)
         & Q(stage=MigrationRequest.GET_COMPLETED)
     ).first()
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(timezone.utc)
     num_days = datetime.timedelta(days=config["COMPLETED_REQUEST_DAYS"])
     if not gr:
         return
@@ -629,7 +630,7 @@ def DELETE_completed(backend_object, config):
         & Q(migration__storage__storage=storage_id)
         & Q(stage=MigrationRequest.DELETE_COMPLETED)
     ).first()
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(timezone.utc)
     num_days = datetime.timedelta(days=config["COMPLETED_REQUEST_DAYS"])
     if not dr:
         return
@@ -704,7 +705,7 @@ def FAILED_completed(backend_object, config):
         Q(migration__storage__storage=storage_id)
         & Q(stage=MigrationRequest.FAILED_COMPLETED)
     )
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(timezone.utc)
     num_days = datetime.timedelta(days=config["COMPLETED_REQUEST_DAYS"])
     #
     for fr in fail_cmpl_reqs:
