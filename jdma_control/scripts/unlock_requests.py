@@ -50,9 +50,9 @@ def run(*args):
         put_stuck = False
 
     pr = MigrationRequest.objects.filter(
-         (Q(request_type=MigrationRequest.PUT)
-         | Q(request_type=MigrationRequest.MIGRATE))
-         & Q(locked=True)
+#         (Q(request_type=MigrationRequest.PUT)
+#         | Q(request_type=MigrationRequest.MIGRATE)) &
+         Q(locked=True)
          & Q(stage=stage)
     )
 
@@ -62,6 +62,6 @@ def run(*args):
             if p.migration.external_id is not None:
                 p.unlock()
                 print("Unlocking : {} ".format(p.pk))
-        else:    
+        else:
             p.unlock()
             print("Unlocking : {} ".format(p.pk))
