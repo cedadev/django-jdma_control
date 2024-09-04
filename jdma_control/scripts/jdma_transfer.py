@@ -394,8 +394,7 @@ def delete(backend_object, credentials, dr):
 
         backend_object.delete_batch(
             conn,
-            dr,
-            dr.migration.external_id,
+            dr
         )
         # close the connection
         conn = connection_pool.close_connection(

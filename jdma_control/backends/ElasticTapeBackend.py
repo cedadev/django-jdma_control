@@ -525,13 +525,20 @@ class ElasticTapeBackend(Backend):
         return str(batch_id)
 
 
-    def delete_batch(self, conn, del_req, batch_id):
+    def delete_batch(self, conn, del_req):
         """Delete a archive of files from the elastic tape"""
-        batchDetails = conn.newBatch(conn.jdma_workspace, None)
-        batchDetails.batchID = int(batch_id)
-        batchDetails.requestor = conn.jdma_user
+        batch_id = del_req.migration.external_id
+        # Get the ip address of the sender
+        ip = get_ip_address()
 
-        conn.msgIface.sendDeleteBatch(batchDetails)
+        batch = conn.newBatch(conn.jdma_workspace, None)
+        batch.batchID = int(batch_id)
+        batch.name = conn.jdma_user
+        batch.requestor = conn.jdma_user
+        batch.PI = ip
+        batch.override = 0
+
+        conn.msgIface.sendDeleteBatch(batch)
         conn.msgIface.readDeleteBatch()
 
 
