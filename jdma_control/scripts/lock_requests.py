@@ -13,9 +13,9 @@ def run(*args):
         raise Exception("stage argument not supplied")
 
     pr = MigrationRequest.objects.filter(
-         (Q(request_type=MigrationRequest.PUT)
-         | Q(request_type=MigrationRequest.MIGRATE))
-         & Q(locked=False)
+#         (Q(request_type=MigrationRequest.PUT)
+#         | Q(request_type=MigrationRequest.MIGRATE)) &
+         Q(locked=False)
          & Q(stage=stage)
     )
 
