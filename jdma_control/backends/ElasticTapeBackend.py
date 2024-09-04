@@ -527,9 +527,12 @@ class ElasticTapeBackend(Backend):
 
     def delete_batch(self, conn, del_req, batch_id):
         """Delete a archive of files from the elastic tape"""
-        conn.deleteBatchByID(conn.jdma_workspace,
-                             conn.jdma_user,
-                             int(batch_id))
+        batchDetails = conn.newBatch(conn.jdma_workspace, None)
+        batchDetails.batchID = int(batch_id)
+        batchDetails.requestor = conn.jdma_user
+
+        conn.msgIface.sendDeleteBatch(batchDetails)
+        conn.msgIface.readDeleteBatch()
 
 
     def get_files(self, vr, batch_id):
