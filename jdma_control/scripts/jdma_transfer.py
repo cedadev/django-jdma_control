@@ -397,6 +397,14 @@ def delete(backend_object, credentials, dr):
             dr,
             dr.migration.external_id,
         )
+        # close the connection
+        conn = connection_pool.close_connection(
+            backend_object,
+            dr,
+            credentials,
+            mode="delete",
+            uid="DELETE"
+        )
     except Exception as e:
         raise(e)
 
